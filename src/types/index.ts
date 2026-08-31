@@ -1,8 +1,9 @@
 export type Gender = 'Male' | 'Female' | 'Other';
+export type PrescriberType = 'Rx' | 'NRx';
 
 export interface SettingItem {
   id?: number;
-  category: 'Specialty' | 'Potential' | 'Stockist' | 'Prescriber' | 'OP Timing' | 'Call Schedule' | 'Gender' | string;
+  category: 'Specialty' | 'Potential' | 'Stockist' | 'Prescriber' | 'OP Timing' | 'Call Schedule' | 'Area' | 'Camp' | 'Gender' | string;
   value: string;
   order_index: number;
   description?: string;
@@ -15,19 +16,18 @@ export interface Doctor {
   name: string;
   specialties: string[]; // multi-select from Settings
   gender?: Gender | string;
-  email?: string;
   hospital?: string;
-  pharmacy?: string; // from Pharmacy master data
+  pharmacy?: string; // from doctor linked pharmacy / master data
   area: string; // from Areas master data
   camp: string; // from Camps master data
   potential: string; // from Settings (e.g. Super Core, Core, High, Medium, Low)
   stockist: string; // from Settings (e.g. Primary, Secondary, Direct, None)
-  prescriber: string; // from Settings (e.g. Loyal Prescriber, Regular, Trial, etc.)
+  prescriber: 'Rx' | 'NRx' | string; // strictly 'Rx' or 'NRx'
   op_timing: string; // from Settings
   op_timing_custom?: string; // if op_timing === 'Other'
   call_schedule: string; // from Settings
   call_schedule_custom?: string; // if call_schedule === 'Other'
-  prescribing_products: string[]; // strictly from Products master data
+  prescribing_products: string[]; // strictly from Products master data (only for Rx doctors)
   notes?: string;
   is_active: boolean;
   created_at: string;
@@ -35,11 +35,11 @@ export interface Doctor {
 }
 
 export interface Product {
-  id: string;
-  name: string;
+  id: string; // e.g. PROD-001
+  name: string; // e.g. ACN 1000
+  form?: string; // DosageForm: Tabs, Drops, Syrup, Injection, etc.
   category?: string;
-  form?: string; // Tablet, Syrup, Injection, Ointment, etc.
-  unit?: string; // 10x10, 100ml, etc.
+  unit?: string;
   active: boolean;
   updated_at?: string;
 }
@@ -47,7 +47,7 @@ export interface Product {
 export interface Camp {
   id: string;
   name: string;
-  area: string;
+  area?: string;
   active: boolean;
   updated_at?: string;
 }
@@ -62,15 +62,15 @@ export interface Area {
 export interface Pharmacy {
   id: string;
   name: string;
-  area: string;
-  camp: string;
+  area?: string;
+  camp?: string;
   contact_person?: string;
   phone?: string;
   active: boolean;
   updated_at?: string;
 }
 
-export type VisitTag = 'normal' | 'sunday' | 'holiday' | 'leave';
+export type VisitTag = 'normal' | 'sunday' | 'holiday';
 
 export interface VisitBundle {
   id: string; // UUID of bundle
@@ -122,14 +122,15 @@ export interface SavedFilterPreset {
     call_schedules?: string[];
     products?: string[];
     prescribers?: string[];
-    // Legacy single fields support
+    potential?: string;
+    search?: string;
+    // Legacy support
     area?: string;
     camp?: string;
     specialty?: string;
     call_schedule?: string;
     product?: string;
     prescriber?: string;
-    search?: string;
   };
   created_at: string;
 }

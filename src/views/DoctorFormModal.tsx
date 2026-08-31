@@ -40,7 +40,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
 
   const [potential, setPotential] = useState('');
   const [stockist, setStockist] = useState('');
-  const [prescriber, setPrescriber] = useState('');
+  const [prescriber, setPrescriber] = useState<'Rx' | 'NRx'>('Rx');
 
   const [opTiming, setOpTiming] = useState('');
   const [opTimingCustom, setOpTimingCustom] = useState('');
@@ -53,7 +53,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
   const [specialtyOptions, setSpecialtyOptions] = useState<SettingItem[]>([]);
   const [potentialOptions, setPotentialOptions] = useState<SettingItem[]>([]);
   const [stockistOptions, setStockistOptions] = useState<SettingItem[]>([]);
-  const [prescriberOptions, setPrescriberOptions] = useState<SettingItem[]>([]);
   const [opTimingOptions, setOpTimingOptions] = useState<SettingItem[]>([]);
   const [callScheduleOptions, setCallScheduleOptions] = useState<SettingItem[]>([]);
   const [allProducts, setAllProducts] = useState<Product[]>([]);
@@ -63,17 +62,13 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
 
   const [isSaving, setIsSaving] = useState(false);
 
-  // Helper to determine if doctor is Rx
-  const isRxSelected = prescriber === 'Rx' || (prescriber && prescriber.toUpperCase().includes('RX') && !prescriber.toUpperCase().includes('NRX') && !prescriber.toLowerCase().includes('non'));
-
   // Load master data options
   useEffect(() => {
     async function loadOptions() {
-      const [spec, pot, stk, pres, op, cs, prods, cmps, ars, phs] = await Promise.all([
+      const [spec, pot, stk, op, cs, prods, cmps, ars, phs] = await Promise.all([
         getSettingValues('Specialty'),
         getSettingValues('Potential'),
         getSettingValues('Stockist'),
-        getSettingValues('Prescriber'),
         getSettingValues('OP Timing'),
         getSettingValues('Call Schedule'),
         getProducts(),
@@ -85,7 +80,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
       setSpecialtyOptions(spec);
       setPotentialOptions(pot);
       setStockistOptions(stk);
-      setPrescriberOptions(pres);
       setOpTimingOptions(op);
       setCallScheduleOptions(cs);
       setAllProducts(prods);
@@ -99,7 +93,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
         if (cmps.length > 0 && !camp) setCamp(cmps[0].name);
         if (pot.length > 0 && !potential) setPotential(pot[0].value);
         if (stk.length > 0 && !stockist) setStockist(stk[0].value);
-        if (pres.length > 0 && !prescriber) setPrescriber(pres[0].value);
         if (op.length > 0 && !opTiming) setOpTiming(op[0].value);
         if (cs.length > 0 && !callSchedule) setCallSchedule(cs[0].value);
       }
@@ -122,7 +115,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
       setCamp(doctorToEdit.camp || '');
       setPotential(doctorToEdit.potential || '');
       setStockist(doctorToEdit.stockist || '');
-      setPrescriber(doctorToEdit.prescriber || '');
+      setPrescriber(doctorToEdit.prescriber === 'NRx' ? 'NRx' : 'Rx');
       setOpTiming(doctorToEdit.op_timing || '');
       setOpTimingCustom(doctorToEdit.op_timing_custom || '');
       setCallSchedule(doctorToEdit.call_schedule || '');
@@ -135,6 +128,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
       setGender('Male');
       setHospital('');
       setPharmacy('');
+      setPrescriber('Rx');
       setOpTimingCustom('');
       setCallScheduleCustom('');
       setPrescribingProducts([]);
@@ -151,10 +145,9 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
       setNameError('Doctor name is required');
       return false;
     }
-    // Reject numbers and inappropriate special characters (allow letters, dots, hyphens, spaces, apostrophes)
     const validNameRegex = /^[A-Za-z\s.'-]+$/;
     if (!validNameRegex.test(val.trim())) {
-      setNameError('Name cannot contain numbers or symbols (e.g. Dr. Ramesh Kumar)');
+      setNameError('Name cannot contain numbers or symbols');
       return false;
     }
     setNameError('');
@@ -184,10 +177,9 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
     }
   };
 
-  const handlePrescriberChange = (newVal: string) => {
+  const handlePrescriberChange = (newVal: 'Rx' | 'NRx') => {
     setPrescriber(newVal);
-    const isNewRx = newVal === 'Rx' || (newVal && newVal.toUpperCase().includes('RX') && !newVal.toUpperCase().includes('NRX') && !newVal.toLowerCase().includes('non'));
-    if (!isNewRx) {
+    if (newVal === 'NRx') {
       setPrescribingProducts([]);
     }
   };
@@ -222,12 +214,12 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
         camp: camp || (allCamps[0]?.name ?? ''),
         potential: potential || (potentialOptions[0]?.value ?? ''),
         stockist: stockist || (stockistOptions[0]?.value ?? ''),
-        prescriber: prescriber || (prescriberOptions[0]?.value ?? ''),
+        prescriber,
         op_timing: opTiming || (opTimingOptions[0]?.value ?? ''),
         op_timing_custom: opTiming.toLowerCase().includes('other') ? opTimingCustom : '',
         call_schedule: callSchedule || (callScheduleOptions[0]?.value ?? ''),
         call_schedule_custom: callSchedule.toLowerCase().includes('other') ? callScheduleCustom : '',
-        prescribing_products: isRxSelected ? prescribingProducts : [],
+        prescribing_products: prescriber === 'Rx' ? prescribingProducts : [],
         notes,
       });
 
@@ -244,12 +236,10 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
     }
   };
 
-  // Filter camps based on area if area selected
   const availableCamps = area
     ? allCamps.filter(c => c.area === area || !c.area)
     : allCamps;
 
-  // Filter pharmacies based on camp if camp selected
   const availablePharmacies = camp
     ? allPharmacies.filter(p => p.camp === camp)
     : allPharmacies;
@@ -285,19 +275,17 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                 required
                 autoComplete="off"
               />
-              {nameError ? (
+              {nameError && (
                 <div className="form-error" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                   <AlertCircle size={12} />
                   <span>{nameError}</span>
                 </div>
-              ) : (
-                <span className="form-hint">No numbers or illegal symbols allowed</span>
               )}
             </div>
 
             <div className="form-group">
               <label className="form-label">
-                Specialty <span style={{ color: 'var(--danger-text)' }}>*</span> (Tap to select)
+                Specialty <span style={{ color: 'var(--danger-text)' }}>*</span>
               </label>
               <div className="pill-grid">
                 {specialtyOptions.map(spec => {
@@ -320,7 +308,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Gender (Optional)</label>
+              <label className="form-label">Gender</label>
               <select
                 className="form-select"
                 value={gender}
@@ -386,13 +374,13 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Attached Pharmacy (From Master Data)</label>
+              <label className="form-label">Attached Pharmacy</label>
               <select
                 className="form-select"
                 value={pharmacy}
                 onChange={e => setPharmacy(e.target.value)}
               >
-                <option value="">Select Attached Pharmacy (Optional)</option>
+                <option value="">Select Attached Pharmacy</option>
                 {availablePharmacies.map(p => (
                   <option key={p.id} value={p.name}>
                     {p.name} ({p.camp})
@@ -440,19 +428,27 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
               </div>
             </div>
 
+            {/* Prescriber: Strictly Rx or NRx */}
             <div className="form-group">
-              <label className="form-label">Prescriber Status</label>
-              <select
-                className="form-select"
-                value={prescriber}
-                onChange={e => handlePrescriberChange(e.target.value)}
-              >
-                {prescriberOptions.map(p => (
-                  <option key={p.value} value={p.value}>
-                    {p.value}
-                  </option>
-                ))}
-              </select>
+              <label className="form-label">
+                Prescriber Status <span style={{ color: 'var(--danger-text)' }}>*</span>
+              </label>
+              <div className="pill-grid">
+                {(['Rx', 'NRx'] as const).map(p => {
+                  const isSelected = prescriber === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`pill-item ${isSelected ? 'selected' : ''}`}
+                      onClick={() => handlePrescriberChange(p)}
+                      style={{ flex: 1, textAlign: 'center', padding: '8px 12px' }}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
@@ -517,15 +513,12 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
             )}
           </div>
 
-          {/* 5. PRESCRIBING PRODUCTS (Visible only when Rx is selected) */}
-          {isRxSelected && (
+          {/* 5. PRESCRIBING PRODUCTS (Visible ONLY when Prescriber = Rx) */}
+          {prescriber === 'Rx' && (
             <div style={{ marginBottom: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
               <h3 style={{ fontSize: '13px', fontWeight: '700', color: 'var(--accent-text)', marginBottom: '6px' }}>
                 PRESCRIBING PRODUCTS
               </h3>
-              <span className="form-hint" style={{ display: 'block', marginBottom: '8px' }}>
-                Select products prescribed by this doctor
-              </span>
               <div className="pill-grid">
                 {allProducts.map(prod => {
                   const isSelected = prescribingProducts.includes(prod.name);
@@ -547,7 +540,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
           {/* 6. NOTES */}
           <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
             <div className="form-group">
-              <label className="form-label">Doctor Notes / Preferences (Optional)</label>
+              <label className="form-label">Doctor Notes</label>
               <textarea
                 className="form-textarea"
                 rows={2}

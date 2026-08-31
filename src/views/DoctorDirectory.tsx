@@ -42,6 +42,7 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
   const [doctors, setDoctors] = useState<Doctor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchRevealed, setIsSearchRevealed] = useState(false);
 
   // Active Multi-Select Filters
   const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
@@ -68,11 +69,11 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
   const [specialties, setSpecialties] = useState<SettingItem[]>([]);
   const [callSchedules, setCallSchedules] = useState<SettingItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [prescribers, setPrescribers] = useState<SettingItem[]>([]);
 
   // Sync external open state if provided from header search icon
   useEffect(() => {
     if (isFilterDrawerOpenExternal) {
+      setIsSearchRevealed(true);
       setIsFilterDrawerOpen(true);
     }
   }, [isFilterDrawerOpenExternal]);
@@ -87,25 +88,21 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
   // Helper for Rx determination
   const isDoctorRx = (doc: Doctor): boolean => {
     if (!doc.prescriber) return false;
-    const p = doc.prescriber.toUpperCase();
-    return (
-      doc.prescriber === 'Rx' ||
-      (p.includes('RX') && !p.includes('NRX') && !doc.prescriber.toLowerCase().includes('non'))
-    );
+    const p = doc.prescriber.trim().toUpperCase();
+    return p === 'RX' || (p.includes('RX') && !p.includes('NRX') && !doc.prescriber.toLowerCase().includes('non'));
   };
 
   // Load all doctors & filter options
   const loadData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [docs, ars, cmps, specs, cs, prods, pres, presets] = await Promise.all([
+      const [docs, ars, cmps, specs, cs, prods, presets] = await Promise.all([
         getDoctors(),
         getAreas(),
         getCamps(),
         getSettingValues('Specialty'),
         getSettingValues('Call Schedule'),
         getProducts(),
-        getSettingValues('Prescriber'),
         getSavedPresets(),
       ]);
 
@@ -115,7 +112,6 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
       setSpecialties(specs);
       setCallSchedules(cs);
       setProducts(prods);
-      setPrescribers(pres);
       setSavedPresets(presets);
     } catch (err: any) {
       console.error(err);
@@ -128,6 +124,39 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Directory Metrics (Computed across active doctors only)
+  const metrics = useMemo(() => {
+    const activeDocs = doctors.filter(d => d.is_active !== false);
+    const total = activeDocs.length;
+    let rxCount = 0;
+    let nrxCount = 0;
+    const hospitalsSet = new Set<string>();
+    const pharmaciesSet = new Set<string>();
+
+    activeDocs.forEach(d => {
+      if (isDoctorRx(d)) {
+        rxCount++;
+      } else {
+        nrxCount++;
+      }
+
+      if (d.hospital && d.hospital.trim()) {
+        hospitalsSet.add(d.hospital.trim().toLowerCase());
+      }
+      if (d.pharmacy && d.pharmacy.trim()) {
+        pharmaciesSet.add(d.pharmacy.trim().toLowerCase());
+      }
+    });
+
+    return {
+      total,
+      rx: rxCount,
+      nrx: nrxCount,
+      hosp: hospitalsSet.size,
+      pharm: pharmaciesSet.size,
+    };
+  }, [doctors]);
 
   // Combined Multi-Filter Logic
   const filteredDoctors = useMemo(() => {
@@ -155,8 +184,14 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
         return false;
       }
       // Prescriber filter
-      if (selectedPrescribers.length > 0 && !selectedPrescribers.includes(doc.prescriber)) {
-        return false;
+      if (selectedPrescribers.length > 0) {
+        const isRx = isDoctorRx(doc);
+        const match = selectedPrescribers.some(p => {
+          if (p === 'Rx') return isRx;
+          if (p === 'NRx') return !isRx;
+          return doc.prescriber === p;
+        });
+        if (!match) return false;
       }
 
       // Text Search
@@ -233,6 +268,12 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
     }
   };
 
+  // Toggle Search & Filters button
+  const handleToggleSearchAndFilters = () => {
+    setIsSearchRevealed(true);
+    setIsFilterDrawerOpen(true);
+  };
+
   // Apply a saved preset
   const applyPreset = (preset: SavedFilterPreset) => {
     const f = preset.filters;
@@ -260,7 +301,10 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
     else if (f.prescriber) setSelectedPrescribers([f.prescriber]);
     else setSelectedPrescribers([]);
 
-    if (f.search) setSearchQuery(f.search);
+    if (f.search) {
+      setSearchQuery(f.search);
+      setIsSearchRevealed(true);
+    }
     showToast(`Applied preset: ${preset.name}`, 'info');
   };
 
@@ -301,156 +345,264 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
 
   return (
     <div className="main-content">
-      {/* Top Action Bar */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+      {/* 1. Minimal Directory Header */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '10px',
+          gap: '8px',
+        }}
+      >
         <div>
-          <h2 style={{ fontSize: '18px', fontWeight: '700', letterSpacing: '-0.02em' }}>Doctor Directory</h2>
+          <h2 style={{ fontSize: '18px', fontWeight: '700', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+            Doctor Directory
+          </h2>
           <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {filteredDoctors.length} {filteredDoctors.length === 1 ? 'doctor' : 'doctors'} found
+            {filteredDoctors.length} {filteredDoctors.length === 1 ? 'doctor' : 'doctors'} shown
           </p>
         </div>
 
-        <button
-          className="btn btn-primary"
-          onClick={() => {
-            setEditingDoctor(null);
-            setIsFormOpen(true);
-          }}
-          style={{ padding: '8px 14px' }}
-        >
-          <Plus size={16} />
-          <span>Add Doctor</span>
-        </button>
-      </div>
-
-      {/* Search Bar & Filter Button */}
-      <div className="search-wrapper">
-        <Search size={17} className="search-icon" />
-        <input
-          type="text"
-          className="search-input"
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-        />
-        {searchQuery && (
-          <button className="search-clear" onClick={() => setSearchQuery('')} aria-label="Clear search">
-            <X size={16} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <button
+            className={`btn ${activeFilterCount > 0 || isSearchRevealed ? 'btn-primary' : 'btn-secondary'} btn-icon`}
+            onClick={handleToggleSearchAndFilters}
+            title="Search & Filters"
+            aria-label="Search and Filters"
+            style={{ width: '38px', height: '38px' }}
+          >
+            <Search size={17} />
           </button>
-        )}
+
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setEditingDoctor(null);
+              setIsFormOpen(true);
+            }}
+            style={{ padding: '8px 14px', height: '38px' }}
+          >
+            <Plus size={16} />
+            <span>Add Doctor</span>
+          </button>
+        </div>
       </div>
 
-      {/* Filter Quick Pills & Presets */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', overflowX: 'auto', paddingBottom: '8px', marginBottom: '8px' }}>
-        <button
-          className={`btn ${activeFilterCount > 0 ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setIsFilterDrawerOpen(true)}
-          style={{ minHeight: '36px', padding: '6px 12px', fontSize: '12px', flexShrink: 0 }}
-        >
-          <Filter size={14} />
-          <span>Filters</span>
-          {activeFilterCount > 0 && (
-            <span
-              style={{
-                background: '#ffffff',
-                color: 'var(--accent-primary)',
-                borderRadius: '9999px',
-                padding: '0 5px',
-                fontSize: '10px',
-                fontWeight: '700',
-              }}
-            >
-              {activeFilterCount}
-            </span>
-          )}
-        </button>
+      {/* 2. Compact Directory Metrics Strip */}
+      <div className="metrics-strip">
+        <div className="metric-item metric-total" title="Total active doctors">
+          <span className="metric-label">Total</span>
+          <span className="metric-value">{metrics.total}</span>
+        </div>
+        <div className="metric-item metric-rx" title="Active Rx doctors">
+          <span className="metric-label">Rx</span>
+          <span className="metric-value">{metrics.rx}</span>
+        </div>
+        <div className="metric-item metric-nrx" title="Active NRx doctors">
+          <span className="metric-label">NRx</span>
+          <span className="metric-value">{metrics.nrx}</span>
+        </div>
+        <div className="metric-item metric-hosp" title="Hospitals represented by active doctors">
+          <span className="metric-label">Hosp</span>
+          <span className="metric-value">{metrics.hosp}</span>
+        </div>
+        <div className="metric-item metric-pharm" title="Pharmacies represented by active doctors">
+          <span className="metric-label">Pharm</span>
+          <span className="metric-value">{metrics.pharm}</span>
+        </div>
+      </div>
 
-        {activeFilterCount > 0 && (
-          <>
+      {/* 3. Revealed Search Bar (Visible when search icon is clicked or query exists) */}
+      {(isSearchRevealed || searchQuery) && (
+        <div className="search-wrapper" style={{ animation: 'fadeIn 0.15s ease forwards' }}>
+          <Search size={17} className="search-icon" />
+          <input
+            type="text"
+            className="search-input"
+            value={searchQuery}
+            autoFocus={isSearchRevealed}
+            onChange={e => setSearchQuery(e.target.value)}
+          />
+          <div style={{ position: 'absolute', right: '8px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            {searchQuery && (
+              <button className="search-clear" onClick={() => setSearchQuery('')} aria-label="Clear search">
+                <X size={16} />
+              </button>
+            )}
             <button
               className="btn btn-ghost"
-              onClick={clearAllFilters}
-              style={{ minHeight: '36px', padding: '6px 10px', fontSize: '12px', flexShrink: 0 }}
+              onClick={() => {
+                setIsSearchRevealed(false);
+                setSearchQuery('');
+              }}
+              style={{ minHeight: '30px', padding: '2px 8px', fontSize: '11px' }}
             >
-              <X size={13} />
-              <span>Clear</span>
-            </button>
-
-            <button
-              className="btn btn-secondary"
-              onClick={() => setIsSavePresetModalOpen(true)}
-              style={{ minHeight: '36px', padding: '6px 10px', fontSize: '12px', flexShrink: 0 }}
-            >
-              <Bookmark size={13} />
-              <span>Save Preset</span>
-            </button>
-          </>
-        )}
-
-        {/* Saved Presets Pills */}
-        {savedPresets.map(preset => (
-          <div
-            key={preset.id}
-            onClick={() => applyPreset(preset)}
-            className="pill-item"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              flexShrink: 0,
-              fontSize: '11px',
-              padding: '5px 10px',
-            }}
-          >
-            <Bookmark size={11} color="var(--accent-text)" />
-            <span>{preset.name}</span>
-            <button
-              onClick={e => handleDeletePreset(preset.id, e)}
-              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '0 2px' }}
-              aria-label="Delete preset"
-            >
-              <X size={11} />
+              Hide
             </button>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
+
+      {/* 4. Filter Quick Pills & Active Presets */}
+      {(activeFilterCount > 0 || savedPresets.length > 0) && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            overflowX: 'auto',
+            paddingBottom: '8px',
+            marginBottom: '8px',
+          }}
+        >
+          <button
+            className={`btn ${activeFilterCount > 0 ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setIsFilterDrawerOpen(true)}
+            style={{ minHeight: '34px', padding: '4px 10px', fontSize: '12px', flexShrink: 0 }}
+          >
+            <Filter size={13} />
+            <span>Filters</span>
+            {activeFilterCount > 0 && (
+              <span
+                style={{
+                  background: '#ffffff',
+                  color: 'var(--accent-primary)',
+                  borderRadius: '9999px',
+                  padding: '0 5px',
+                  fontSize: '10px',
+                  fontWeight: '700',
+                }}
+              >
+                {activeFilterCount}
+              </span>
+            )}
+          </button>
+
+          {activeFilterCount > 0 && (
+            <>
+              <button
+                className="btn btn-ghost"
+                onClick={clearAllFilters}
+                style={{ minHeight: '34px', padding: '4px 8px', fontSize: '12px', flexShrink: 0 }}
+              >
+                <X size={13} />
+                <span>Clear</span>
+              </button>
+
+              <button
+                className="btn btn-secondary"
+                onClick={() => setIsSavePresetModalOpen(true)}
+                style={{ minHeight: '34px', padding: '4px 8px', fontSize: '12px', flexShrink: 0 }}
+              >
+                <Bookmark size={13} />
+                <span>Save Preset</span>
+              </button>
+            </>
+          )}
+
+          {/* Saved Presets Pills */}
+          {savedPresets.map(preset => (
+            <div
+              key={preset.id}
+              onClick={() => applyPreset(preset)}
+              className="pill-item"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                flexShrink: 0,
+                fontSize: '11px',
+                padding: '4px 8px',
+              }}
+            >
+              <Bookmark size={11} color="var(--accent-text)" />
+              <span>{preset.name}</span>
+              <button
+                onClick={e => handleDeletePreset(preset.id, e)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '0 2px',
+                }}
+                aria-label="Delete preset"
+              >
+                <X size={11} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Active Filter Badges */}
       {activeFilterCount > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
           {selectedAreas.map(a => (
             <span key={a} className="badge badge-primary">
-              Area: {a} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedAreas, setSelectedAreas, a)} />
+              Area: {a}{' '}
+              <X
+                size={11}
+                style={{ cursor: 'pointer' }}
+                onClick={() => toggleItem(selectedAreas, setSelectedAreas, a)}
+              />
             </span>
           ))}
           {selectedCamps.map(c => (
             <span key={c} className="badge badge-primary">
-              Camp: {c} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedCamps, setSelectedCamps, c)} />
+              Camp: {c}{' '}
+              <X
+                size={11}
+                style={{ cursor: 'pointer' }}
+                onClick={() => toggleItem(selectedCamps, setSelectedCamps, c)}
+              />
             </span>
           ))}
           {selectedSpecialties.map(s => (
             <span key={s} className="badge badge-primary">
-              Specialty: {s} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedSpecialties, setSelectedSpecialties, s)} />
+              Specialty: {s}{' '}
+              <X
+                size={11}
+                style={{ cursor: 'pointer' }}
+                onClick={() => toggleItem(selectedSpecialties, setSelectedSpecialties, s)}
+              />
             </span>
           ))}
           {selectedPrescribers.map(p => (
             <span key={p} className="badge badge-primary">
-              Prescriber: {p} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedPrescribers, setSelectedPrescribers, p)} />
+              Prescriber: {p}{' '}
+              <X
+                size={11}
+                style={{ cursor: 'pointer' }}
+                onClick={() => toggleItem(selectedPrescribers, setSelectedPrescribers, p)}
+              />
             </span>
           ))}
           {selectedProducts.map(pr => (
             <span key={pr} className="badge badge-primary">
-              Product: {pr} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedProducts, setSelectedProducts, pr)} />
+              Product: {pr}{' '}
+              <X
+                size={11}
+                style={{ cursor: 'pointer' }}
+                onClick={() => toggleItem(selectedProducts, setSelectedProducts, pr)}
+              />
             </span>
           ))}
           {selectedCallSchedules.map(cs => (
             <span key={cs} className="badge badge-primary">
-              Schedule: {cs} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedCallSchedules, setSelectedCallSchedules, cs)} />
+              Schedule: {cs}{' '}
+              <X
+                size={11}
+                style={{ cursor: 'pointer' }}
+                onClick={() => toggleItem(selectedCallSchedules, setSelectedCallSchedules, cs)}
+              />
             </span>
           ))}
         </div>
       )}
 
-      {/* Doctors List */}
+      {/* 5. Doctors List */}
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-muted)' }}>
           <p style={{ fontSize: '14px' }}>Loading doctors...</p>
@@ -511,11 +663,17 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
                 style={{
                   cursor: 'pointer',
                   margin: 0,
-                  borderLeft: rx ? '4px solid var(--accent-primary)' : '1px solid var(--border-card)',
-                  background: rx ? 'var(--bg-card-rx)' : 'var(--bg-card-solid)',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: '8px',
+                    marginBottom: '6px',
+                  }}
+                >
                   <div>
                     <h3 className="card-title">{doc.name}</h3>
                     <p style={{ fontSize: '12px', color: 'var(--accent-text)', fontWeight: '500' }}>
@@ -530,13 +688,22 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
                       className={`badge ${rx ? 'badge-primary' : 'badge-neutral'}`}
                       style={{ fontSize: '10px', fontWeight: rx ? '700' : '500' }}
                     >
-                      {doc.prescriber}
+                      {rx ? 'Rx' : 'NRx'}
                     </span>
                   </div>
                 </div>
 
                 {/* Location & Pharmacy */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '10px',
+                    fontSize: '12px',
+                    color: 'var(--text-secondary)',
+                    marginBottom: '8px',
+                  }}
+                >
                   <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                     <MapPin size={12} color="var(--text-muted)" />
                     <strong>{doc.camp}</strong> {doc.area ? `(${doc.area})` : ''}
@@ -559,7 +726,15 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
 
                 {/* Prescribing Products (Display directly on card only for Rx doctors) */}
                 {rx && doc.prescribing_products && doc.prescribing_products.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px', paddingTop: '4px' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '4px',
+                      marginBottom: '8px',
+                      paddingTop: '2px',
+                    }}
+                  >
                     {doc.prescribing_products.map((prod, i) => (
                       <span
                         key={i}
@@ -573,8 +748,27 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
                 )}
 
                 {/* Schedule info */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', paddingTop: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    borderTop: '1px solid var(--border-subtle)',
+                    paddingTop: '6px',
+                    fontSize: '11px',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
                     <Calendar size={12} />
                     <span>Call: {doc.call_schedule_custom || doc.call_schedule}</span>
                   </div>
@@ -606,22 +800,22 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
             </div>
 
             <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              {/* Prescriber Category */}
+              {/* Prescriber Category (Strictly Rx / NRx) */}
               <div>
                 <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>
                   Prescriber Status
                 </label>
                 <div className="pill-grid">
-                  {prescribers.map(p => {
-                    const isSelected = selectedPrescribers.includes(p.value);
+                  {['Rx', 'NRx'].map(p => {
+                    const isSelected = selectedPrescribers.includes(p);
                     return (
                       <button
-                        key={p.value}
+                        key={p}
                         type="button"
                         className={`pill-item ${isSelected ? 'selected' : ''}`}
-                        onClick={() => toggleItem(selectedPrescribers, setSelectedPrescribers, p.value)}
+                        onClick={() => toggleItem(selectedPrescribers, setSelectedPrescribers, p)}
                       >
-                        {p.value}
+                        {p}
                       </button>
                     );
                   })}

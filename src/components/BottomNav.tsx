@@ -7,17 +7,15 @@ interface BottomNavProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   hasPending?: boolean;
-  hidden?: boolean;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
   activeTab,
   onSelectTab,
   hasPending = false,
-  hidden = false,
 }) => {
   return (
-    <nav className={`bottom-nav ${hidden ? 'bottom-nav-hidden' : ''}`} aria-label="Main Navigation">
+    <nav className="bottom-nav" aria-label="Main Navigation">
       <div className="bottom-nav-inner" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         <button
           className={`nav-item ${activeTab === 'directory' ? 'active' : ''}`}
@@ -54,7 +52,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
                 width: '6px',
                 height: '6px',
                 borderRadius: '50%',
-                background: 'var(--warning-text)',
+                background: 'var(--accent-text)',
               }}
             />
           )}

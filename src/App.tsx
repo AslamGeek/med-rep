@@ -18,14 +18,47 @@ export const App: React.FC = () => {
   // Navigation tab state
   const [activeTab, setActiveTab] = useState<NavTab>('directory');
   const [preSelectedDoctorId, setPreSelectedDoctorId] = useState<string | null>(null);
-  const [pendingCount, setPendingCount] = useState<number>(0);
+  const [hasPendingSync, setHasPendingSync] = useState<boolean>(false);
   const [isDbReady, setIsDbReady] = useState(false);
+  const [isHeaderHidden, setIsHeaderHidden] = useState(false);
 
   // Apply theme to document element
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('medrep_theme', theme);
   }, [theme]);
+
+  // Track scroll direction for top header show/hide behavior
+  useEffect(() => {
+    let lastScrollY = window.scrollY;
+    let ticking = false;
+
+    const handleScroll = () => {
+      if (!ticking) {
+        window.requestAnimationFrame(() => {
+          const currentScrollY = window.scrollY;
+
+          if (currentScrollY <= 15) {
+            // Near the very top: always show header
+            setIsHeaderHidden(false);
+          } else if (currentScrollY > lastScrollY && currentScrollY - lastScrollY > 8) {
+            // Scrolling down: smoothly hide header
+            setIsHeaderHidden(true);
+          } else if (lastScrollY - currentScrollY > 4) {
+            // Scrolling slightly upward: immediately restore header
+            setIsHeaderHidden(false);
+          }
+
+          lastScrollY = Math.max(0, currentScrollY);
+          ticking = false;
+        });
+        ticking = true;
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Initialize IndexedDB and sync listeners
   useEffect(() => {
@@ -38,7 +71,7 @@ export const App: React.FC = () => {
     setup();
 
     const unsub = syncEngine.subscribe(info => {
-      setPendingCount(info.pendingCount);
+      setHasPendingSync(info.pendingCount > 0);
     });
 
     return () => unsub();
@@ -79,7 +112,7 @@ export const App: React.FC = () => {
   return (
     <ToastProvider>
       <div className="app-container">
-        <Header theme={theme} onToggleTheme={toggleTheme} />
+        <Header theme={theme} onToggleTheme={toggleTheme} hidden={isHeaderHidden} />
 
         <main style={{ flex: 1 }}>
           {activeTab === 'directory' && (
@@ -106,10 +139,9 @@ export const App: React.FC = () => {
             }
             setActiveTab(tab);
           }}
-          hasPending={pendingCount > 0}
+          hasPending={hasPendingSync}
         />
       </div>
     </ToastProvider>
   );
 };
-

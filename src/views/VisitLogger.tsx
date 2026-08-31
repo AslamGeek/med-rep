@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Calendar,
   MapPin,
@@ -11,6 +11,8 @@ import {
   ChevronDown,
   Send,
   Building2,
+  Palmtree,
+  Sun,
 } from 'lucide-react';
 import type { Camp, Pharmacy, VisitTag } from '../types';
 import {
@@ -18,9 +20,11 @@ import {
   getPharmacies,
   getDoctorsWithVisitMeta,
   createVisitBundle,
+  undoVisitBundle,
   formatDateDDMMYYYY,
   type DoctorWithVisitMeta,
 } from '../db/repository';
+import { syncEngine } from '../sync/syncEngine';
 import { useToast } from '../components/Toast';
 
 interface VisitLoggerProps {
@@ -54,9 +58,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
   // Form Controls
   const [selectedDate, setSelectedDate] = useState<string>(todayISO);
   const [selectedCamp, setSelectedCamp] = useState<string>('');
-  const [selectedTag, setSelectedTag] = useState<VisitTag>(() => {
-    return checkIsSunday(todayISO) ? 'sunday' : 'normal';
-  });
+  const [isHoliday, setIsHoliday] = useState<boolean>(false);
 
   // Master Data
   const [camps, setCamps] = useState<Camp[]>([]);
@@ -74,20 +76,20 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Timer ref to trigger auto-sync after undo window
+  const syncTimeoutRef = useRef<number | null>(null);
+
   // Auto-detect Sunday on date changes
   const handleDateChange = (newDate: string) => {
     setSelectedDate(newDate);
     if (checkIsSunday(newDate)) {
-      setSelectedTag('sunday');
       setSelectedDoctorIds(new Set());
-    } else if (selectedTag === 'sunday') {
-      setSelectedTag('normal');
     }
   };
 
-  const isSunday = selectedTag === 'sunday' || checkIsSunday(selectedDate);
-  const isLeave = selectedTag === 'leave';
-  const isRestricted = isSunday || isLeave;
+  const isSunday = checkIsSunday(selectedDate);
+  const isRestrictedDay = isSunday || isHoliday;
+  const currentTag: VisitTag = isSunday ? 'sunday' : isHoliday ? 'holiday' : 'normal';
 
   // Load Camps
   useEffect(() => {
@@ -132,6 +134,15 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
     loadCampData();
   }, [loadCampData]);
 
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (syncTimeoutRef.current) {
+        clearTimeout(syncTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Filtered doctors for in-camp search
   const filteredDoctors = useMemo(() => {
     if (!searchQuery.trim()) return doctors;
@@ -148,7 +159,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
 
   // Toggle Doctor selection
   const toggleDoctor = (id: string) => {
-    if (isRestricted) return;
+    if (isRestrictedDay) return;
     setSelectedDoctorIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -162,7 +173,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
 
   // Select All / Clear All
   const handleSelectAll = () => {
-    if (isRestricted) return;
+    if (isRestrictedDay) return;
     setSelectedDoctorIds(new Set(filteredDoctors.map(d => d.id)));
   };
 
@@ -170,26 +181,12 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
     setSelectedDoctorIds(new Set());
   };
 
-  // One-tap quick tag toggler
-  const handleTagToggle = (tag: VisitTag) => {
-    if (tag === 'sunday') {
-      // Sunday is governed by date, but if toggled, enforce restrictions
-      setSelectedTag(prev => (prev === 'sunday' ? 'normal' : 'sunday'));
-      setSelectedDoctorIds(new Set());
-    } else if (tag === 'leave') {
-      setSelectedTag(prev => (prev === 'leave' ? 'normal' : 'leave'));
-      setSelectedDoctorIds(new Set());
-    } else {
-      setSelectedTag(prev => (prev === tag ? 'normal' : tag));
-    }
-  };
-
   // Selected doctors list for preview & deriving linked pharmacies
   const selectedDoctorsList = useMemo(() => {
     return doctors.filter(d => selectedDoctorIds.has(d.id));
   }, [doctors, selectedDoctorIds]);
 
-  // Automatically derive linked pharmacies from selected doctors (unique)
+  // Automatically derive linked pharmacies from selected doctors (strictly doctor-linked, no separate UI)
   const derivedPharmacies = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
     selectedDoctorsList.forEach(doc => {
@@ -208,38 +205,55 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
     return Array.from(map.values());
   }, [selectedDoctorsList, pharmacies]);
 
-  // Save the entire visit bundle
+  // Save the visit bundle immediately + show 2.5-3s temporary Undo confirmation
   const handleSaveVisitBundle = async () => {
     if (!selectedCamp) {
       showToast('Please select a camp', 'error');
       return;
     }
 
-    if (selectedDate < todayISO) {
-      showToast('Date cannot be in the past', 'error');
-      return;
-    }
-
-    if (isRestricted) {
-      // For Sunday or Leave, save empty visit day bundle
+    if (isRestrictedDay) {
+      // For Sunday or Holiday, create bundle without doctors
       setIsSaving(true);
       try {
+        const tagToSave: VisitTag = isSunday ? 'sunday' : 'holiday';
         const bundle = await createVisitBundle({
           date: selectedDate,
           camp: selectedCamp,
-          tag: selectedTag,
+          tag: tagToSave,
           doctorIds: [],
           pharmacyIds: [],
         });
 
+        // Store state for undo rollback
+        const prevHolidayState = isHoliday;
+        const savedCamp = selectedCamp;
+
+        // Provide 3s Undo confirmation
         showToast(
-          `Logged ${selectedTag.toUpperCase()} for ${selectedCamp}`,
-          'success'
+          `Logged ${tagToSave.toUpperCase()} for ${selectedCamp}`,
+          'success',
+          3000,
+          {
+            label: 'Undo',
+            onClick: async () => {
+              await undoVisitBundle(bundle.id);
+              setIsHoliday(prevHolidayState);
+              setSelectedCamp(savedCamp);
+              showToast('Holiday entry undone', 'info');
+            },
+          }
         );
 
-        setSelectedDoctorIds(new Set());
+        setIsHoliday(false);
         setIsPreviewOpen(false);
         onVisitLoggedSuccessfully(bundle.id);
+
+        // Auto-sync after 3 seconds if not undone
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = window.setTimeout(() => {
+          syncEngine.checkPendingAndSync();
+        }, 3200);
       } catch (err: any) {
         showToast('Error saving bundle: ' + err.message, 'error');
       } finally {
@@ -248,35 +262,55 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
       return;
     }
 
-    if (selectedDoctorIds.size === 0 && selectedTag === 'normal') {
+    if (selectedDoctorIds.size === 0) {
       showToast('Please select at least one doctor to log a visit', 'error');
       return;
     }
 
     setIsSaving(true);
+    const savedDocIds = new Set(selectedDoctorIds);
+    const savedCamp = selectedCamp;
+
     try {
       const bundle = await createVisitBundle({
         date: selectedDate,
         camp: selectedCamp,
-        tag: selectedTag,
+        tag: 'normal',
         doctorIds: Array.from(selectedDoctorIds),
         pharmacyIds: derivedPharmacies.map(p => p.id),
       });
 
-      showToast(
-        `Bundle saved: ${bundle.doctor_count} doctors · ${bundle.pharmacy_count} linked pharmacies`,
-        'success'
-      );
-
-      // Reset selection
+      // Clear selection immediately on successful save
       setSelectedDoctorIds(new Set());
       setIsPreviewOpen(false);
-      setSelectedTag('normal');
+
+      // Temporary 3s confirmation with Undo action
+      showToast(
+        `Bundle saved: ${bundle.doctor_count} doctors · ${bundle.pharmacy_count} pharmacies`,
+        'success',
+        3000,
+        {
+          label: 'Undo',
+          onClick: async () => {
+            await undoVisitBundle(bundle.id);
+            // Restore selection so user can immediately correct without navigating
+            setSelectedDoctorIds(savedDocIds);
+            setSelectedCamp(savedCamp);
+            loadCampData();
+            showToast('Bundle creation undone', 'info');
+          },
+        }
+      );
 
       // Reload metadata so days since last visit updates immediately
       loadCampData();
-
       onVisitLoggedSuccessfully(bundle.id);
+
+      // Auto-sync after 3 seconds if not undone
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+      syncTimeoutRef.current = window.setTimeout(() => {
+        syncEngine.checkPendingAndSync();
+      }, 3200);
     } catch (err: any) {
       showToast('Error saving visit bundle: ' + err.message, 'error');
     } finally {
@@ -286,9 +320,9 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
 
   return (
     <div className="main-content" style={{ paddingBottom: '140px' }}>
-      {/* 1. TOP CONTROLS: CAMP, DATE & ONE-TAP TAGS */}
+      {/* 1. TOP CONTROLS: CAMP, DATE & SINGLE MARK HOLIDAY ACTION */}
       <div className="card" style={{ marginBottom: '14px', background: 'var(--bg-secondary)' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '10px', marginBottom: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '10px', marginBottom: '10px' }}>
           {/* Camp Selector */}
           <div>
             <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -310,7 +344,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
             </select>
           </div>
 
-          {/* Date Selector (Today & Future Only) */}
+          {/* Date Selector */}
           <div>
             <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <Calendar size={12} color="var(--accent-text)" /> Date
@@ -319,47 +353,43 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
               type="date"
               className="form-input"
               value={selectedDate}
-              min={todayISO}
               onChange={e => handleDateChange(e.target.value)}
             />
           </div>
         </div>
 
-        {/* One-Tap Quick Tags (Sunday, Holiday, Leave) */}
-        <div>
-          <span className="form-label" style={{ display: 'block', marginBottom: '6px', fontSize: '11px' }}>
-            Day Type
-          </span>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button
-              type="button"
-              className={`pill-item ${selectedTag === 'sunday' ? 'selected' : ''}`}
-              onClick={() => handleTagToggle('sunday')}
-              style={{ flex: 1, textAlign: 'center', padding: '6px 4px' }}
-            >
-              Sunday
-            </button>
-            <button
-              type="button"
-              className={`pill-item ${selectedTag === 'holiday' ? 'selected' : ''}`}
-              onClick={() => handleTagToggle('holiday')}
-              style={{ flex: 1, textAlign: 'center', padding: '6px 4px' }}
-            >
-              Holiday
-            </button>
-            <button
-              type="button"
-              className={`pill-item ${selectedTag === 'leave' ? 'selected' : ''}`}
-              onClick={() => handleTagToggle('leave')}
-              style={{ flex: 1, textAlign: 'center', padding: '6px 4px' }}
-            >
-              Leave
-            </button>
+        {/* Single "Mark Holiday" Action */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', paddingTop: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Palmtree size={16} color={isHoliday ? 'var(--warning-text)' : 'var(--text-muted)'} />
+            <span style={{ fontSize: '13px', fontWeight: '600' }}>
+              {isHoliday ? 'Marked as Holiday' : 'Mark Holiday'}
+            </span>
           </div>
+
+          <button
+            type="button"
+            className={`btn ${isHoliday ? 'btn-primary' : 'btn-secondary'}`}
+            disabled={isSunday}
+            onClick={() => {
+              setIsHoliday(prev => !prev);
+              setSelectedDoctorIds(new Set());
+            }}
+            style={{
+              padding: '6px 14px',
+              minHeight: '34px',
+              fontSize: '12px',
+              background: isHoliday ? 'var(--warning-text)' : undefined,
+              color: isHoliday ? '#000' : undefined,
+              borderColor: isHoliday ? 'var(--warning-text)' : undefined,
+            }}
+          >
+            {isHoliday ? 'Holiday Active' : 'Mark Holiday'}
+          </button>
         </div>
       </div>
 
-      {/* 2. VISIT LOGGING RESTRICTIONS (SUNDAY / LEAVE) OR DOCTOR SELECTION */}
+      {/* 2. SUNDAY OR HOLIDAY BANNER */}
       {isSunday ? (
         <div
           className="card"
@@ -369,17 +399,18 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
             background: 'var(--bg-secondary)',
             color: 'var(--text-muted)',
             marginBottom: '14px',
+            border: '1px dashed var(--border-card)',
           }}
         >
-          <Calendar size={28} style={{ margin: '0 auto 10px', color: 'var(--accent-text)' }} />
+          <Sun size={32} style={{ margin: '0 auto 10px', color: 'var(--warning-text)' }} />
           <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
             Sunday
           </h3>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Visit logging is disabled on Sundays.
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '300px', margin: '0 auto' }}>
+            Sunday is recognized automatically. Visit logging for doctors and pharmacies is disabled on Sundays.
           </p>
         </div>
-      ) : isLeave ? (
+      ) : isHoliday ? (
         <div
           className="card"
           style={{
@@ -388,14 +419,15 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
             background: 'var(--bg-secondary)',
             color: 'var(--text-muted)',
             marginBottom: '14px',
+            border: '1px dashed var(--warning-border)',
           }}
         >
-          <Calendar size={28} style={{ margin: '0 auto 10px', color: 'var(--warning-text)' }} />
+          <Palmtree size={32} style={{ margin: '0 auto 10px', color: 'var(--warning-text)' }} />
           <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
-            Leave
+            Holiday
           </h3>
-          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Visit logging is disabled during leave.
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '300px', margin: '0 auto' }}>
+            This date is marked as a holiday. Doctor and pharmacy selection is disabled.
           </p>
         </div>
       ) : (
@@ -438,7 +470,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
             </div>
           </div>
 
-          {/* DOCTORS CHECKLIST */}
+          {/* DOCTORS CHECKLIST (Doctors only, pharmacies derived automatically) */}
           {isLoading ? (
             <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--text-muted)' }}>
               Loading {selectedCamp} records...
@@ -548,7 +580,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
                 fontFamily: 'var(--font-mono)',
               }}
             >
-              {isRestricted ? 0 : selectedDoctorIds.size}
+              {isRestrictedDay ? 0 : selectedDoctorIds.size}
             </div>
 
             <div>
@@ -558,16 +590,16 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                   {formatDateDDMMYYYY(selectedDate)}
                 </span>
-                {selectedTag !== 'normal' && (
+                {currentTag !== 'normal' && (
                   <span className="badge badge-warning" style={{ textTransform: 'capitalize', fontSize: '10px' }}>
-                    {selectedTag}
+                    {currentTag}
                   </span>
                 )}
               </div>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                {isRestricted
-                  ? `${selectedTag.toUpperCase()} selected`
-                  : `${selectedDoctorIds.size} doctors · ${derivedPharmacies.length} linked pharmacies`}
+                {isRestrictedDay
+                  ? `${currentTag.toUpperCase()} selected`
+                  : `${selectedDoctorIds.size} doctors · ${derivedPharmacies.length} auto-linked pharmacies`}
               </p>
             </div>
 
@@ -578,11 +610,11 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
           <button
             className="btn btn-primary"
             onClick={handleSaveVisitBundle}
-            disabled={isSaving || (!isRestricted && selectedDoctorIds.size === 0)}
+            disabled={isSaving || (!isRestrictedDay && selectedDoctorIds.size === 0)}
             style={{ minHeight: '38px', padding: '6px 14px', fontSize: '13px' }}
           >
             <Send size={15} />
-            <span>{isSaving ? 'Saving...' : 'Save Bundle'}</span>
+            <span>{isSaving ? 'Saving...' : isRestrictedDay ? `Save ${currentTag.toUpperCase()}` : 'Save Bundle'}</span>
           </button>
         </div>
 
@@ -610,9 +642,9 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
               </button>
             </div>
 
-            {isRestricted ? (
+            {isRestrictedDay ? (
               <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Logging {selectedTag.toUpperCase()} day bundle for {selectedCamp}.
+                Logging {currentTag.toUpperCase()} day bundle for {selectedCamp}. No doctors or pharmacies will be visited.
               </p>
             ) : (
               <>
@@ -660,7 +692,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
                 {/* Automatically Derived Linked Pharmacies List */}
                 <div>
                   <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-text)', marginBottom: '4px' }}>
-                    Linked Pharmacies ({derivedPharmacies.length})
+                    Auto-Linked Pharmacies ({derivedPharmacies.length})
                   </div>
                   {derivedPharmacies.length === 0 ? (
                     <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -686,7 +718,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
                             <strong>{idx + 1}.</strong> {ph.name}
                           </span>
                           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                            Auto-linked
+                            Auto-derived
                           </span>
                         </div>
                       ))}

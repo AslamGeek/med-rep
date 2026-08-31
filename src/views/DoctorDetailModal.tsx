@@ -19,6 +19,8 @@ export const DoctorDetailModal: React.FC<DoctorDetailModalProps> = ({
 }) => {
   if (!isOpen || !doctor) return null;
 
+  const isRx = doctor.prescriber === 'Rx' || (doctor.prescriber && doctor.prescriber.toUpperCase().includes('RX') && !doctor.prescriber.toUpperCase().includes('NRX'));
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-sheet" onClick={e => e.stopPropagation()}>
@@ -56,13 +58,13 @@ export const DoctorDetailModal: React.FC<DoctorDetailModalProps> = ({
           {/* Key tags */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '16px' }}>
             <span className="badge badge-primary">
-              <MapPin size={11} /> {doctor.camp} · {doctor.area}
+              <MapPin size={11} /> {doctor.camp} {doctor.area ? `· ${doctor.area}` : ''}
             </span>
             <span className="badge badge-success">
               <Award size={11} /> {doctor.potential} Potential
             </span>
-            <span className="badge badge-warning">
-              <Shield size={11} /> {doctor.prescriber}
+            <span className={`badge ${isRx ? 'badge-primary' : 'badge-neutral'}`} style={{ fontWeight: '700' }}>
+              <Shield size={11} /> {isRx ? 'Rx Prescriber' : 'NRx Prescriber'}
             </span>
           </div>
 
@@ -109,7 +111,7 @@ export const DoctorDetailModal: React.FC<DoctorDetailModalProps> = ({
           </div>
 
           {/* Prescribing Products (Only for Rx doctors) */}
-          {(doctor.prescriber === 'Rx' || (doctor.prescriber && doctor.prescriber.toUpperCase().includes('RX') && !doctor.prescriber.toUpperCase().includes('NRX') && !doctor.prescriber.toLowerCase().includes('non'))) && (
+          {isRx && (
             <div className="card" style={{ marginBottom: '12px' }}>
               <h4 style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>
                 Prescribing Products ({doctor.prescribing_products?.length || 0})

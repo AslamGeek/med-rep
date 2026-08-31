@@ -139,23 +139,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const appsScriptCodeSnippet = `/**
  * Google Apps Script for Medical Representative Field App
  * Spreadsheet ID: 1ruBHykbuZGVCi1iBO25rsnHujC2nrpFv1LwtuMYfX6I
+ * 4 Primary Tabs: Settings (Matrix), Doctors, Visits (1 row per bundle), Products
  */
 
 const SPREADSHEET_ID = '1ruBHykbuZGVCi1iBO25rsnHujC2nrpFv1LwtuMYfX6I';
 
 const TAB_SCHEMAS = {
-  'Settings': ['category', 'value', 'order_index', 'description', 'active', 'updated_at'],
-  'Doctors': ['id', 'name', 'specialties', 'gender', 'email', 'hospital', 'pharmacy', 'area', 'camp', 'potential', 'stockist', 'prescriber', 'op_timing', 'op_timing_custom', 'call_schedule', 'call_schedule_custom', 'prescribing_products', 'notes', 'is_active', 'created_at', 'updated_at'],
-  'Products': ['id', 'name', 'category', 'form', 'unit', 'active', 'updated_at'],
-  'Camps': ['id', 'name', 'area', 'active', 'updated_at'],
-  'Areas': ['id', 'name', 'active', 'updated_at'],
-  'Pharmacies': ['id', 'name', 'area', 'camp', 'contact_person', 'phone', 'active', 'updated_at'],
-  'Visit Logs': ['bundle_id', 'visit_id', 'date', 'camp', 'entity_type', 'entity_id', 'entity_name', 'specialty', 'pharmacy', 'tag', 'synced_at', 'created_at']
+  'Settings': ['Areas', 'Specialties', 'Camps', 'Potentials', 'Stockist', 'OP Timing', 'Call Schedule'],
+  'Doctors': ['ID', 'Name', 'Specialties', 'Gender', 'Hospital', 'Attached Pharmacy', 'Area', 'Camp', 'Potential', 'Stockist', 'Prescriber', 'OP Timing', 'Call Schedule', 'Prescribing Products', 'Notes', 'Active', 'Updated At'],
+  'Visits': ['Date', 'Day', 'Camp', 'Doctors (count)', 'Pharmacy (count)', 'Doctors', 'Pharmacy'],
+  'Products': ['ProdID', 'Name', 'DosageForm']
 };
 
 function getSpreadsheet() {
   try { return SpreadsheetApp.openById(SPREADSHEET_ID); }
   catch(e) { return SpreadsheetApp.getActiveSpreadsheet(); }
+}
+
+function getDayName(dateStr) {
+  if (!dateStr) return '';
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const parts = String(dateStr).split('-');
+  if (parts.length === 3) {
+    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    return days[d.getDay()] || '';
+  }
+  const d = new Date(dateStr);
+  return isNaN(d.getTime()) ? '' : days[d.getDay()];
 }
 
 function ensureAllSheetsExist() {
@@ -169,6 +179,26 @@ function ensureAllSheetsExist() {
       sheet.setFrozenRows(1);
     }
   }
+}
+
+function readSettingsMatrix() {
+  const ss = getSpreadsheet();
+  const sheet = ss.getSheetByName('Settings');
+  if (!sheet) return {};
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+  if (lastRow <= 1 || lastCol === 0) return {};
+  const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  const headers = values[0].map(h => String(h).trim());
+  const matrix = {};
+  headers.forEach(h => { matrix[h] = []; });
+  for (let r = 1; r < values.length; r++) {
+    for (let c = 0; c < headers.length; c++) {
+      const v = values[r][c];
+      if (v !== '' && v !== null && v !== undefined) matrix[headers[c]].push(String(v).trim());
+    }
+  }
+  return matrix;
 }
 
 function readSheetData(sheetName) {
@@ -204,13 +234,10 @@ function doGet(e) {
       return createJsonResponse({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        settings: readSheetData('Settings'),
+        settings_matrix: readSettingsMatrix(),
         doctors: readSheetData('Doctors'),
         products: readSheetData('Products'),
-        camps: readSheetData('Camps'),
-        areas: readSheetData('Areas'),
-        pharmacies: readSheetData('Pharmacies'),
-        visit_logs: readSheetData('Visit Logs')
+        visits: readSheetData('Visits')
       });
     }
     return createJsonResponse({ status: 'error', message: 'Unknown action: ' + action });
@@ -225,30 +252,84 @@ function doPost(e) {
     const payload = JSON.parse(e.postData.contents);
     const ss = getSpreadsheet();
     const now = new Date().toISOString();
-    
-    // Append visit logs
-    if (Array.isArray(payload.visits) && payload.visits.length > 0) {
-      const sheet = ss.getSheetByName('Visit Logs');
-      const schema = TAB_SCHEMAS['Visit Logs'];
-      const rows = payload.visits.map(v => schema.map(col => v[col] || ''));
-      sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, schema.length).setValues(rows);
-    }
+    const results = { doctors_synced: 0, visits_logged: 0 };
     
     // Upsert doctors
     if (Array.isArray(payload.doctors) && payload.doctors.length > 0) {
       const docSheet = ss.getSheetByName('Doctors');
       const schema = TAB_SCHEMAS['Doctors'];
+      const existingValues = docSheet.getDataRange().getValues();
+      const existingIdToRowMap = {};
+      for (let r = 1; r < existingValues.length; r++) {
+        const id = String(existingValues[r][0]);
+        if (id) existingIdToRowMap[id] = r + 1;
+      }
       payload.doctors.forEach(doc => {
-        const rowData = schema.map(col => {
-          let val = doc[col];
-          if (Array.isArray(val)) val = JSON.stringify(val);
-          return val === undefined || val === null ? '' : val;
-        });
-        docSheet.appendRow(rowData);
+        const rowData = [
+          doc.id || '',
+          doc.name || '',
+          Array.isArray(doc.specialties) ? doc.specialties.join(', ') : (doc.specialties || ''),
+          doc.gender || 'Male',
+          doc.hospital || '',
+          doc.pharmacy || '',
+          doc.area || '',
+          doc.camp || '',
+          doc.potential || '',
+          doc.stockist || '',
+          doc.prescriber || 'Rx',
+          doc.op_timing_custom || doc.op_timing || '',
+          doc.call_schedule_custom || doc.call_schedule || '',
+          doc.prescriber === 'Rx' && Array.isArray(doc.prescribing_products) ? doc.prescribing_products.join(', ') : (doc.prescribing_products || ''),
+          doc.notes || '',
+          doc.is_active !== false ? 'TRUE' : 'FALSE',
+          doc.updated_at || now
+        ];
+        const docId = String(doc.id);
+        if (existingIdToRowMap[docId]) {
+          docSheet.getRange(existingIdToRowMap[docId], 1, 1, schema.length).setValues([rowData]);
+        } else {
+          docSheet.appendRow(rowData);
+          existingIdToRowMap[docId] = docSheet.getLastRow();
+        }
+        results.doctors_synced++;
       });
     }
 
-    return createJsonResponse({ status: 'ok', timestamp: now });
+    // Append 1-row-per-bundle visit logs
+    if (Array.isArray(payload.visit_bundles) && payload.visit_bundles.length > 0) {
+      const visitSheet = ss.getSheetByName('Visits');
+      const schema = TAB_SCHEMAS['Visits'];
+      const rowsToAppend = [];
+      payload.visit_bundles.forEach(bundle => {
+        const dayName = bundle.day || getDayName(bundle.date);
+        const isHolidayOrSunday = bundle.tag === 'sunday' || bundle.tag === 'holiday';
+        let doctorsCell = isHolidayOrSunday 
+          ? (bundle.tag === 'sunday' ? 'Sunday (No Visits)' : 'Holiday (No Visits)')
+          : (Array.isArray(bundle.doctors_snapshot) && bundle.doctors_snapshot.length > 0
+              ? bundle.doctors_snapshot.map(d => d.name + (d.specialty ? ' (' + d.specialty + ')' : '')).join('\\n')
+              : '-');
+        let pharmacyCell = isHolidayOrSunday
+          ? '-'
+          : (Array.isArray(bundle.pharmacies_snapshot) && bundle.pharmacies_snapshot.length > 0
+              ? bundle.pharmacies_snapshot.map(p => p.name).join('\\n')
+              : '-');
+        rowsToAppend.push([
+          bundle.date || '',
+          dayName,
+          bundle.camp || '',
+          isHolidayOrSunday ? 0 : (bundle.doctor_count || 0),
+          isHolidayOrSunday ? 0 : (bundle.pharmacy_count || 0),
+          doctorsCell,
+          pharmacyCell
+        ]);
+      });
+      if (rowsToAppend.length > 0) {
+        visitSheet.getRange(visitSheet.getLastRow() + 1, 1, rowsToAppend.length, schema.length).setValues(rowsToAppend);
+        results.visits_logged = rowsToAppend.length;
+      }
+    }
+
+    return createJsonResponse({ status: 'ok', timestamp: now, results: results });
   } catch(err) {
     return createJsonResponse({ status: 'error', message: err.toString() });
   }
@@ -300,12 +381,11 @@ function createJsonResponse(data) {
           <input
             type="url"
             className="form-input"
-            placeholder="https://script.google.com/macros/s/.../exec"
             value={scriptUrl}
             onChange={e => setScriptUrl(e.target.value)}
           />
           <span className="form-hint">
-            Connected to Spreadsheet ID: <code style={{ fontFamily: 'var(--font-mono)' }}>1ruBHykbuZGVCi1iBO25rsnHujC2nrpFv1LwtuMYfX6I</code>
+            Connected to 4-Tab Spreadsheet: <code style={{ fontFamily: 'var(--font-mono)' }}>1ruBHykbuZGVCi1iBO25rsnHujC2nrpFv1LwtuMYfX6I</code>
           </span>
         </div>
 
@@ -348,10 +428,6 @@ function createJsonResponse(data) {
             </strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Pending Offline Changes:</span>
-            <strong style={{ fontFamily: 'var(--font-mono)' }}>{syncInfo.pendingCount}</strong>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--text-muted)' }}>Last Synced:</span>
             <span>{syncInfo.lastSyncedAt ? new Date(syncInfo.lastSyncedAt).toLocaleString() : 'Never'}</span>
           </div>
@@ -370,10 +446,10 @@ function createJsonResponse(data) {
             <button
               className="btn btn-secondary"
               onClick={handleInitializeSheets}
-              title="Ensure all 7 tabs exist in Google Sheets"
+              title="Ensure 4 primary tabs exist in Google Sheets"
               style={{ flex: 1 }}
             >
-              Initialize Tabs
+              Initialize 4 Tabs
             </button>
           </div>
         </div>
@@ -387,7 +463,7 @@ function createJsonResponse(data) {
         </div>
 
         <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px' }}>
-          These dropdown values are cached from Google Sheets for 100% offline field use.
+          Dynamic master data matrix and products cached locally for 100% offline field use.
         </p>
 
         {/* Master tabs */}
@@ -448,8 +524,8 @@ function createJsonResponse(data) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
               {masterProducts.map(p => (
                 <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span><strong>{p.name}</strong> {p.unit ? `(${p.unit})` : ''}</span>
-                  <span className="badge badge-neutral">{p.category || p.form}</span>
+                  <span><strong>{p.name}</strong></span>
+                  <span className="badge badge-neutral">{p.form || p.category || 'Product'}</span>
                 </div>
               ))}
             </div>
@@ -545,7 +621,7 @@ function createJsonResponse(data) {
             <div className="modal-body" style={{ fontSize: '12px' }}>
               <div className="card" style={{ background: 'var(--bg-primary)', marginBottom: '12px' }}>
                 <h4 style={{ fontSize: '13px', fontWeight: '700', marginBottom: '6px', color: 'var(--accent-text)' }}>
-                  3-Step Deployment Guide:
+                  3-Step Deployment Guide (4-Tab Schema):
                 </h4>
                 <ol style={{ paddingLeft: '18px', display: 'flex', flexDirection: 'column', gap: '4px', lineHeight: 1.4 }}>
                   <li>Open spreadsheet: <a href="https://docs.google.com/spreadsheets/d/1ruBHykbuZGVCi1iBO25rsnHujC2nrpFv1LwtuMYfX6I/edit" target="_blank" rel="noreferrer" style={{ color: 'var(--accent-text)' }}>Spreadsheet Link</a></li>

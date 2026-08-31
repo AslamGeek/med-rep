@@ -30,7 +30,7 @@ export class MedRepDatabase extends Dexie {
     this.version(1).stores({
       settings: '++id, category, value, [category+value], active, order_index',
       doctors: 'id, name, area, camp, prescriber, potential, call_schedule, is_active, updated_at, *specialties, *prescribing_products',
-      products: 'id, name, category, active',
+      products: 'id, name, form, active',
       camps: 'id, name, area, active',
       areas: 'id, name, active',
       pharmacies: 'id, name, area, camp, active',
@@ -76,7 +76,7 @@ export const DEFAULT_MASTER_DATA = {
     { category: 'Stockist', value: 'Direct', order_index: 3, active: true },
     { category: 'Stockist', value: 'None', order_index: 4, active: true },
 
-    // Prescriber
+    // Prescriber (Strictly Rx and NRx)
     { category: 'Prescriber', value: 'Rx', order_index: 1, active: true },
     { category: 'Prescriber', value: 'NRx', order_index: 2, active: true },
 
@@ -96,10 +96,17 @@ export const DEFAULT_MASTER_DATA = {
     { category: 'Call Schedule', value: 'Every 10 Days', order_index: 6, active: true },
     { category: 'Call Schedule', value: 'Other', order_index: 7, active: true },
 
-    // Gender
-    { category: 'Gender', value: 'Male', order_index: 1, active: true },
-    { category: 'Gender', value: 'Female', order_index: 2, active: true },
-    { category: 'Gender', value: 'Other', order_index: 3, active: true },
+    // Areas
+    { category: 'Area', value: 'Central Zone', order_index: 1, active: true },
+    { category: 'Area', value: 'North Zone', order_index: 2, active: true },
+    { category: 'Area', value: 'South Zone', order_index: 3, active: true },
+
+    // Camps
+    { category: 'Camp', value: 'Proddatur', order_index: 1, active: true },
+    { category: 'Camp', value: 'Kadapa', order_index: 2, active: true },
+    { category: 'Camp', value: 'Jammalamadugu', order_index: 3, active: true },
+    { category: 'Camp', value: 'Mydukur', order_index: 4, active: true },
+    { category: 'Camp', value: 'Pulivendula', order_index: 5, active: true },
   ] as SettingItem[],
 
   areas: [
@@ -117,22 +124,25 @@ export const DEFAULT_MASTER_DATA = {
   ] as Camp[],
 
   products: [
-    { id: 'prod_1', name: 'Azithromycin 500mg', category: 'Antibiotic', form: 'Tablet', unit: '10x3', active: true },
-    { id: 'prod_2', name: 'Pantoprazole DSR', category: 'Gastro', form: 'Capsule', unit: '10x10', active: true },
-    { id: 'prod_3', name: 'Paracetamol 650mg', category: 'Analgesic', form: 'Tablet', unit: '10x15', active: true },
-    { id: 'prod_4', name: 'Telmisartan 40mg + Amlodipine 5mg', category: 'Cardiovascular', form: 'Tablet', unit: '10x10', active: true },
-    { id: 'prod_5', name: 'Metformin 500mg SR + Glimepiride 2mg', category: 'Diabetic', form: 'Tablet', unit: '10x10', active: true },
-    { id: 'prod_6', name: 'Montelukast 10mg + Levocetirizine 5mg', category: 'Respiratory', form: 'Tablet', unit: '10x10', active: true },
-    { id: 'prod_7', name: 'Cefixime 200mg', category: 'Antibiotic', form: 'Tablet', unit: '10x10', active: true },
-    { id: 'prod_8', name: 'Multivitamin with Zinc & Ginseng', category: 'Nutraceutical', form: 'Syrup', unit: '200ml', active: true },
+    { id: 'PROD-001', name: 'ACN 1000', form: 'Tabs', active: true },
+    { id: 'PROD-002', name: 'ACN 650', form: 'Tabs', active: true },
+    { id: 'PROD-003', name: 'ANECHEK', form: 'Tabs', active: true },
+    { id: 'PROD-004', name: 'ANECHEK-XT', form: 'Tabs', active: true },
+    { id: 'PROD-005', name: 'API-TOP', form: 'Drops', active: true },
+    { id: 'PROD-006', name: 'Azithromycin 500mg', form: 'Tablet', active: true },
+    { id: 'PROD-007', name: 'Pantoprazole DSR', form: 'Capsule', active: true },
+    { id: 'PROD-008', name: 'Paracetamol 650mg', form: 'Tablet', active: true },
+    { id: 'PROD-009', name: 'Telmisartan 40mg', form: 'Tablet', active: true },
+    { id: 'PROD-010', name: 'Metformin 500mg SR', form: 'Tablet', active: true },
+    { id: 'PROD-011', name: 'Montelukast 10mg', form: 'Tablet', active: true },
   ] as Product[],
 
   pharmacies: [
-    { id: 'ph_1', name: 'Sri Lakshmi Medicals', area: 'Central Zone', camp: 'Proddatur', contact_person: 'Venkatesh', phone: '9876543210', active: true },
-    { id: 'ph_2', name: 'Apollo Pharmacy Gandhi Road', area: 'Central Zone', camp: 'Proddatur', contact_person: 'Srinivas', phone: '9876543211', active: true },
-    { id: 'ph_3', name: 'MedPlus Main Bazaar', area: 'South Zone', camp: 'Kadapa', contact_person: 'Ramanathan', phone: '9876543212', active: true },
-    { id: 'ph_4', name: 'Sanjivani Chemist', area: 'North Zone', camp: 'Jammalamadugu', contact_person: 'Rajesh', phone: '9876543213', active: true },
-    { id: 'ph_5', name: 'Balaji Pharma & Surgicals', area: 'Central Zone', camp: 'Mydukur', contact_person: 'Naveen', phone: '9876543214', active: true },
+    { id: 'ph_1', name: 'Sri Lakshmi Medicals', area: 'Central Zone', camp: 'Proddatur', active: true },
+    { id: 'ph_2', name: 'Apollo Pharmacy Gandhi Road', area: 'Central Zone', camp: 'Proddatur', active: true },
+    { id: 'ph_3', name: 'MedPlus Main Bazaar', area: 'South Zone', camp: 'Kadapa', active: true },
+    { id: 'ph_4', name: 'Sanjivani Chemist', area: 'North Zone', camp: 'Jammalamadugu', active: true },
+    { id: 'ph_5', name: 'Balaji Pharma & Surgicals', area: 'Central Zone', camp: 'Mydukur', active: true },
   ] as Pharmacy[],
 };
 

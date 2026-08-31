@@ -12,6 +12,7 @@ import type {
   SyncQueueItem,
   VisitTag,
 } from '../types';
+import { syncEngine } from '../sync/syncEngine';
 
 /**
  * Generate a clean standard ID
@@ -165,31 +166,32 @@ export async function getDoctorsWithVisitMeta(campName: string, searchQuery?: st
 }
 
 /**
- * Save / Update doctor and enqueue sync mutation
+ * Save / Update doctor and enqueue sync mutation, then automatically trigger background sync
  */
 export async function saveDoctor(doctor: Partial<Doctor> & { name: string }): Promise<Doctor> {
   const now = new Date().toISOString();
   const isNew = !doctor.id;
   const id = doctor.id || generateId('doc');
 
+  const prescriberVal = doctor.prescriber === 'NRx' ? 'NRx' : 'Rx';
+
   const fullDoctor: Doctor = {
     id,
     name: doctor.name.trim(),
     specialties: doctor.specialties || [],
     gender: doctor.gender || 'Male',
-    email: doctor.email?.trim() || '',
     hospital: doctor.hospital?.trim() || '',
-    pharmacy: doctor.pharmacy || '',
+    pharmacy: doctor.pharmacy?.trim() || '',
     area: doctor.area || '',
     camp: doctor.camp || '',
     potential: doctor.potential || 'High',
     stockist: doctor.stockist || 'Primary',
-    prescriber: doctor.prescriber || 'Regular Prescriber',
+    prescriber: prescriberVal,
     op_timing: doctor.op_timing || 'Morning (9:00 AM - 1:00 PM)',
     op_timing_custom: doctor.op_timing_custom?.trim() || '',
     call_schedule: doctor.call_schedule || 'Weekly',
     call_schedule_custom: doctor.call_schedule_custom?.trim() || '',
-    prescribing_products: doctor.prescribing_products || [],
+    prescribing_products: prescriberVal === 'Rx' ? (doctor.prescribing_products || []) : [],
     notes: doctor.notes?.trim() || '',
     is_active: doctor.is_active !== false,
     created_at: doctor.created_at || now,
@@ -210,6 +212,9 @@ export async function saveDoctor(doctor: Partial<Doctor> & { name: string }): Pr
     updated_at: now,
   };
   await db.syncQueue.put(queueItem);
+
+  // Automatically trigger silent background sync
+  syncEngine.checkPendingAndSync();
 
   return fullDoctor;
 }
@@ -241,10 +246,18 @@ export async function createVisitBundle(params: CreateVisitBundleParams): Promis
     pharmacy: d.pharmacy,
   }));
 
-  const pharmaciesSnapshot = pharmacies.map(p => ({
-    id: p.id,
-    name: p.name,
-  }));
+  // Build pharmacy snapshot: from matched pharmacies or doctor linked pharmacies
+  const pharmaciesMap = new Map<string, { id: string; name: string }>();
+  pharmacies.forEach(p => pharmaciesMap.set(p.name.toLowerCase(), { id: p.id, name: p.name }));
+  doctorsSnapshot.forEach(d => {
+    if (d.pharmacy && !pharmaciesMap.has(d.pharmacy.toLowerCase())) {
+      pharmaciesMap.set(d.pharmacy.toLowerCase(), {
+        id: generateId('ph'),
+        name: d.pharmacy,
+      });
+    }
+  });
+  const pharmaciesSnapshot = Array.from(pharmaciesMap.values());
 
   const bundle: VisitBundle = {
     id: bundleId,
@@ -252,9 +265,9 @@ export async function createVisitBundle(params: CreateVisitBundleParams): Promis
     camp: params.camp,
     tag: params.tag,
     doctor_ids: params.doctorIds,
-    pharmacy_ids: params.pharmacyIds,
+    pharmacy_ids: pharmaciesSnapshot.map(p => p.id),
     doctor_count: params.doctorIds.length,
-    pharmacy_count: params.pharmacyIds.length,
+    pharmacy_count: pharmaciesSnapshot.length,
     doctors_snapshot: doctorsSnapshot,
     pharmacies_snapshot: pharmaciesSnapshot,
     created_at: now,
@@ -319,6 +332,15 @@ export async function createVisitBundle(params: CreateVisitBundleParams): Promis
   return bundle;
 }
 
+/**
+ * Undo / Revert a newly saved visit bundle within the undo window
+ */
+export async function undoVisitBundle(bundleId: string): Promise<void> {
+  await db.visitBundles.delete(bundleId);
+  await db.visitLogs.where('bundle_id').equals(bundleId).delete();
+  await db.syncQueue.where('entity_id').equals(bundleId).delete();
+}
+
 export async function getVisitBundles(campFilter?: string, dateFilter?: string): Promise<VisitBundle[]> {
   let bundles = await db.visitBundles.toArray();
 
@@ -363,17 +385,35 @@ export async function getProducts(): Promise<Product[]> {
 }
 
 export async function getCamps(): Promise<Camp[]> {
-  return await db.camps.filter(c => c.active !== false).toArray();
+  const campsFromTable = await db.camps.filter(c => c.active !== false).toArray();
+  if (campsFromTable.length > 0) return campsFromTable;
+
+  // Fallback: derive from Settings 'Camp' category
+  const campSettings = await getSettingValues('Camp');
+  return campSettings.map(s => ({
+    id: `camp_${s.value.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+    name: s.value,
+    active: true,
+  }));
 }
 
 export async function getAreas(): Promise<Area[]> {
-  return await db.areas.filter(a => a.active !== false).toArray();
+  const areasFromTable = await db.areas.filter(a => a.active !== false).toArray();
+  if (areasFromTable.length > 0) return areasFromTable;
+
+  // Fallback: derive from Settings 'Area' category
+  const areaSettings = await getSettingValues('Area');
+  return areaSettings.map(s => ({
+    id: `area_${s.value.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+    name: s.value,
+    active: true,
+  }));
 }
 
 export async function getPharmacies(campFilter?: string): Promise<Pharmacy[]> {
   let pharmacies = await db.pharmacies.filter(p => p.active !== false).toArray();
   if (campFilter) {
-    pharmacies = pharmacies.filter(p => p.camp.toLowerCase() === campFilter.toLowerCase());
+    pharmacies = pharmacies.filter(p => !p.camp || p.camp.toLowerCase() === campFilter.toLowerCase());
   }
   return pharmacies;
 }
