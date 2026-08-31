@@ -492,7 +492,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
               No doctors found in <strong>{selectedCamp}</strong>.
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="doctor-list-scroll-pane">
               {filteredDoctors.map(doc => {
                 const isSelected = selectedDoctorIds.has(doc.id);
                 const isOverdue = doc.daysSinceLastVisit === null || doc.daysSinceLastVisit >= 14;
