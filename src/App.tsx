@@ -5,7 +5,7 @@ import { ToastProvider } from './components/Toast';
 import { DoctorDirectory } from './views/DoctorDirectory';
 import { VisitsView } from './views/VisitsView';
 import { SettingsView } from './views/SettingsView';
-import { initializeDatabase } from './db';
+import { db, initializeDatabase } from './db';
 import { syncEngine } from './sync/syncEngine';
 import type { Doctor } from './types';
 
@@ -65,6 +65,14 @@ export const App: React.FC = () => {
     async function setup() {
       await initializeDatabase();
       setIsDbReady(true);
+
+      // Only auto-sync on load if there's genuinely no local data yet
+      // (first-ever visit / fresh incognito). If cached data already
+      // exists, skip syncing so the app loads instantly as before.
+      const existingDoctorCount = await db.doctors.count();
+      if (existingDoctorCount === 0) {
+        syncEngine.syncNow();
+      }
     }
     setup();
 
