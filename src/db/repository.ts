@@ -173,13 +173,12 @@ export async function saveDoctor(doctor: Partial<Doctor> & { name: string }): Pr
   const isNew = !doctor.id;
   const id = doctor.id || generateId('doc');
 
-  const prescriberVal = doctor.prescriber === 'NRx' ? 'NRx' : 'Rx';
+  const prescriberVal = doctor.prescriber === 'Rx' ? 'Rx' : 'NRx';
 
   const fullDoctor: Doctor = {
     id,
     name: doctor.name.trim(),
     specialties: doctor.specialties || [],
-    gender: doctor.gender || 'Male',
     hospital: doctor.hospital?.trim() || '',
     pharmacy: doctor.pharmacy?.trim() || '',
     area: doctor.area || '',
@@ -368,11 +367,22 @@ export async function getVisitBundles(campFilter?: string, dateFilter?: string):
 // -------------------------------------------------------------
 
 export async function getSettingValues(category: string): Promise<SettingItem[]> {
-  const items = await db.settings
+  // Support both 'OP Timing' and 'OP Timings'
+  let items = await db.settings
     .where('category')
     .equals(category)
     .filter(item => item.active !== false)
     .sortBy('order_index');
+
+  if (items.length === 0 && (category === 'OP Timing' || category === 'OP Timings')) {
+    const altCat = category === 'OP Timing' ? 'OP Timings' : 'OP Timing';
+    items = await db.settings
+      .where('category')
+      .equals(altCat)
+      .filter(item => item.active !== false)
+      .sortBy('order_index');
+  }
+
   return items;
 }
 
@@ -385,29 +395,33 @@ export async function getProducts(): Promise<Product[]> {
 }
 
 export async function getCamps(): Promise<Camp[]> {
-  const campsFromTable = await db.camps.filter(c => c.active !== false).toArray();
-  if (campsFromTable.length > 0) return campsFromTable;
-
-  // Fallback: derive from Settings 'Camp' category
+  // Settings sheet Camps column is the source of truth
   const campSettings = await getSettingValues('Camp');
-  return campSettings.map(s => ({
-    id: `camp_${s.value.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
-    name: s.value,
-    active: true,
-  }));
+  if (campSettings.length > 0) {
+    return campSettings.map((s, idx) => ({
+      id: `camp_${idx + 1}`,
+      name: s.value,
+      active: true,
+    }));
+  }
+
+  const campsFromTable = await db.camps.filter(c => c.active !== false).toArray();
+  return campsFromTable;
 }
 
 export async function getAreas(): Promise<Area[]> {
-  const areasFromTable = await db.areas.filter(a => a.active !== false).toArray();
-  if (areasFromTable.length > 0) return areasFromTable;
-
-  // Fallback: derive from Settings 'Area' category
+  // Settings sheet Areas column is the source of truth
   const areaSettings = await getSettingValues('Area');
-  return areaSettings.map(s => ({
-    id: `area_${s.value.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
-    name: s.value,
-    active: true,
-  }));
+  if (areaSettings.length > 0) {
+    return areaSettings.map((s, idx) => ({
+      id: `area_${idx + 1}`,
+      name: s.value,
+      active: true,
+    }));
+  }
+
+  const areasFromTable = await db.areas.filter(a => a.active !== false).toArray();
+  return areasFromTable;
 }
 
 export async function getPharmacies(campFilter?: string): Promise<Pharmacy[]> {

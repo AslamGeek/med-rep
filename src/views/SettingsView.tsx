@@ -44,7 +44,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  const [isSyncing, setIsSyncing] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
   const [isCodeModalOpen, setIsCodeModalOpen] = useState(false);
 
@@ -107,23 +107,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  const handleManualSync = async () => {
-    setIsSyncing(true);
-    try {
-      const result = await syncEngine.syncNow();
-      if (result.success) {
-        showToast(result.message, 'success');
-        await loadMasterData();
-      } else {
-        showToast(result.message, 'error');
-      }
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
   const handleInitializeSheets = async () => {
-    setIsSyncing(true);
+    setIsInitializing(true);
     try {
       const result = await syncEngine.initializeSheets();
       if (result.success) {
@@ -132,7 +117,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         showToast(result.message, 'error');
       }
     } finally {
-      setIsSyncing(false);
+      setIsInitializing(false);
     }
   };
 
@@ -145,8 +130,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 const SPREADSHEET_ID = '1ruBHykbuZGVCi1iBO25rsnHujC2nrpFv1LwtuMYfX6I';
 
 const TAB_SCHEMAS = {
-  'Settings': ['Areas', 'Specialties', 'Camps', 'Potentials', 'Stockist', 'OP Timing', 'Call Schedule'],
-  'Doctors': ['ID', 'Name', 'Specialties', 'Gender', 'Hospital', 'Attached Pharmacy', 'Area', 'Camp', 'Potential', 'Stockist', 'Prescriber', 'OP Timing', 'Call Schedule', 'Prescribing Products', 'Notes', 'Active', 'Updated At'],
+  'Settings': ['Areas', 'Specialties', 'Camps', 'Potentials', 'Stockist', 'OP Timings', 'Call Schedule'],
+  'Doctors': ['ID', 'Name', 'Specialties', 'Hospital', 'Attached Pharmacy', 'Area', 'Camp', 'Potential', 'Stockist', 'Prescriber', 'OP Timing', 'Call Schedule', 'Prescribing Products', 'Notes', 'Active', 'Updated At'],
   'Visits': ['Date', 'Day', 'Camp', 'Doctors (count)', 'Pharmacy (count)', 'Doctors', 'Pharmacy'],
   'Products': ['ProdID', 'Name', 'DosageForm']
 };
@@ -191,7 +176,7 @@ function readSettingsMatrix() {
   const values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
   const headers = values[0].map(h => String(h).trim());
   const matrix = {};
-  headers.forEach(h => { matrix[h] = []; });
+  headers.forEach(h => { if (h) matrix[h] = []; });
   for (let r = 1; r < values.length; r++) {
     for (let c = 0; c < headers.length; c++) {
       const v = values[r][c];
@@ -257,36 +242,47 @@ function doPost(e) {
     // Upsert doctors
     if (Array.isArray(payload.doctors) && payload.doctors.length > 0) {
       const docSheet = ss.getSheetByName('Doctors');
-      const schema = TAB_SCHEMAS['Doctors'];
       const existingValues = docSheet.getDataRange().getValues();
+      const headers = existingValues.length > 0 ? existingValues[0].map(h => String(h).trim()) : TAB_SCHEMAS['Doctors'];
+      const colMap = {};
+      headers.forEach((h, idx) => { colMap[h.toLowerCase()] = idx; });
+      const idColIdx = colMap['id'] !== undefined ? colMap['id'] : 0;
       const existingIdToRowMap = {};
       for (let r = 1; r < existingValues.length; r++) {
-        const id = String(existingValues[r][0]);
+        const id = String(existingValues[r][idColIdx]);
         if (id) existingIdToRowMap[id] = r + 1;
       }
       payload.doctors.forEach(doc => {
-        const rowData = [
-          doc.id || '',
-          doc.name || '',
-          Array.isArray(doc.specialties) ? doc.specialties.join(', ') : (doc.specialties || ''),
-          doc.gender || 'Male',
-          doc.hospital || '',
-          doc.pharmacy || '',
-          doc.area || '',
-          doc.camp || '',
-          doc.potential || '',
-          doc.stockist || '',
-          doc.prescriber || 'Rx',
-          doc.op_timing_custom || doc.op_timing || '',
-          doc.call_schedule_custom || doc.call_schedule || '',
-          doc.prescriber === 'Rx' && Array.isArray(doc.prescribing_products) ? doc.prescribing_products.join(', ') : (doc.prescribing_products || ''),
-          doc.notes || '',
-          doc.is_active !== false ? 'TRUE' : 'FALSE',
-          doc.updated_at || now
-        ];
+        const specialtiesStr = Array.isArray(doc.specialties) ? doc.specialties.join(', ') : (doc.specialties || '');
+        const prescribingProdsStr = (doc.prescriber === 'Rx' && Array.isArray(doc.prescribing_products)) ? doc.prescribing_products.join(', ') : (doc.prescribing_products || '');
+        const fieldMap = {
+          'id': doc.id || '',
+          'name': doc.name || '',
+          'specialties': specialtiesStr,
+          'hospital': doc.hospital || '',
+          'attached pharmacy': doc.pharmacy || '',
+          'pharmacy': doc.pharmacy || '',
+          'area': doc.area || '',
+          'camp': doc.camp || '',
+          'potential': doc.potential || '',
+          'stockist': doc.stockist || '',
+          'prescriber': doc.prescriber || 'NRx',
+          'op timing': doc.op_timing_custom || doc.op_timing || '',
+          'op timings': doc.op_timing_custom || doc.op_timing || '',
+          'call schedule': doc.call_schedule_custom || doc.call_schedule || '',
+          'prescribing products': prescribingProdsStr,
+          'notes': doc.notes || '',
+          'active': doc.is_active !== false ? 'TRUE' : 'FALSE',
+          'updated at': doc.updated_at || now
+        };
+        const rowData = new Array(headers.length).fill('');
+        headers.forEach((h, colIdx) => {
+          const key = h.toLowerCase();
+          if (fieldMap[key] !== undefined) rowData[colIdx] = fieldMap[key];
+        });
         const docId = String(doc.id);
         if (existingIdToRowMap[docId]) {
-          docSheet.getRange(existingIdToRowMap[docId], 1, 1, schema.length).setValues([rowData]);
+          docSheet.getRange(existingIdToRowMap[docId], 1, 1, headers.length).setValues([rowData]);
         } else {
           docSheet.appendRow(rowData);
           existingIdToRowMap[docId] = docSheet.getLastRow();
@@ -298,7 +294,8 @@ function doPost(e) {
     // Append 1-row-per-bundle visit logs
     if (Array.isArray(payload.visit_bundles) && payload.visit_bundles.length > 0) {
       const visitSheet = ss.getSheetByName('Visits');
-      const schema = TAB_SCHEMAS['Visits'];
+      const existingValues = visitSheet.getDataRange().getValues();
+      const headers = existingValues.length > 0 ? existingValues[0].map(h => String(h).trim()) : TAB_SCHEMAS['Visits'];
       const rowsToAppend = [];
       payload.visit_bundles.forEach(bundle => {
         const dayName = bundle.day || getDayName(bundle.date);
@@ -313,18 +310,24 @@ function doPost(e) {
           : (Array.isArray(bundle.pharmacies_snapshot) && bundle.pharmacies_snapshot.length > 0
               ? bundle.pharmacies_snapshot.map(p => p.name).join('\\n')
               : '-');
-        rowsToAppend.push([
-          bundle.date || '',
-          dayName,
-          bundle.camp || '',
-          isHolidayOrSunday ? 0 : (bundle.doctor_count || 0),
-          isHolidayOrSunday ? 0 : (bundle.pharmacy_count || 0),
-          doctorsCell,
-          pharmacyCell
-        ]);
+        const fieldMap = {
+          'date': bundle.date || '',
+          'day': dayName,
+          'camp': bundle.camp || '',
+          'doctors (count)': isHolidayOrSunday ? 0 : (bundle.doctor_count || 0),
+          'pharmacy (count)': isHolidayOrSunday ? 0 : (bundle.pharmacy_count || 0),
+          'doctors': doctorsCell,
+          'pharmacy': pharmacyCell
+        };
+        const rowData = new Array(headers.length).fill('');
+        headers.forEach((h, colIdx) => {
+          const key = h.toLowerCase();
+          if (fieldMap[key] !== undefined) rowData[colIdx] = fieldMap[key];
+        });
+        rowsToAppend.push(rowData);
       });
       if (rowsToAppend.length > 0) {
-        visitSheet.getRange(visitSheet.getLastRow() + 1, 1, rowsToAppend.length, schema.length).setValues(rowsToAppend);
+        visitSheet.getRange(visitSheet.getLastRow() + 1, 1, rowsToAppend.length, headers.length).setValues(rowsToAppend);
         results.visits_logged = rowsToAppend.length;
       }
     }
@@ -422,9 +425,9 @@ function createJsonResponse(data) {
         {/* Sync Status Info */}
         <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Sync Status:</span>
+            <span style={{ color: 'var(--text-muted)' }}>Auto-Sync Status:</span>
             <strong style={{ textTransform: 'capitalize', color: syncInfo.state === 'synced' ? 'var(--success-text)' : syncInfo.state === 'pending' ? 'var(--warning-text)' : 'inherit' }}>
-              {syncInfo.state}
+              {syncInfo.state === 'synced' ? 'Online & Synced' : syncInfo.state === 'pending' ? `${syncInfo.pendingCount} Changes Pending Auto-Sync` : syncInfo.state}
             </strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -434,22 +437,13 @@ function createJsonResponse(data) {
 
           <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
             <button
-              className="btn btn-primary"
-              onClick={handleManualSync}
-              disabled={isSyncing}
-              style={{ flex: 1 }}
-            >
-              <RefreshCw size={15} style={{ animation: isSyncing ? 'spin 1s linear infinite' : 'none' }} />
-              <span>{isSyncing ? 'Syncing...' : 'Sync Now'}</span>
-            </button>
-
-            <button
               className="btn btn-secondary"
               onClick={handleInitializeSheets}
-              title="Ensure 4 primary tabs exist in Google Sheets"
+              disabled={isInitializing}
+              title="Ensure 4 primary tabs exist non-destructively in Google Sheets"
               style={{ flex: 1 }}
             >
-              Initialize 4 Tabs
+              {isInitializing ? 'Initializing...' : 'Initialize 4 Tabs'}
             </button>
           </div>
         </div>

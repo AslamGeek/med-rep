@@ -5,23 +5,23 @@
  * Deployment Instructions:
  * 1. Open your Google Spreadsheet: https://docs.google.com/spreadsheets/d/1ruBHykbuZGVCi1iBO25rsnHujC2nrpFv1LwtuMYfX6I/edit
  * 2. Click Extensions > Apps Script
- * 3. Delete any existing code in Code.gs and paste this entire file
+ * 3. Replace Code.gs with this code
  * 4. Click "Deploy" > "New deployment"
  * 5. Select type: "Web app"
- * 6. Description: "MedRep Field App Simplified Sync Engine"
+ * 6. Description: "MedRep 4-Tab Sync Engine"
  * 7. Execute as: "Me"
- * 8. Who has access: "Anyone" (allows PWA offline sync without OAuth prompt)
- * 9. Click "Deploy", authorize permissions, and copy the Web App URL into the app's Settings!
+ * 8. Who has access: "Anyone"
+ * 9. Click "Deploy", authorize permissions, and paste the Web App URL into the app's Settings!
  */
 
 const SPREADSHEET_ID = '1ruBHykbuZGVCi1iBO25rsnHujC2nrpFv1LwtuMYfX6I';
 
 const TAB_SCHEMAS = {
   'Settings': [
-    'Areas', 'Specialties', 'Camps', 'Potentials', 'Stockist', 'OP Timing', 'Call Schedule'
+    'Areas', 'Specialties', 'Camps', 'Potentials', 'Stockist', 'OP Timings', 'Call Schedule'
   ],
   'Doctors': [
-    'ID', 'Name', 'Specialties', 'Gender', 'Hospital', 'Attached Pharmacy', 
+    'ID', 'Name', 'Specialties', 'Hospital', 'Attached Pharmacy', 
     'Area', 'Camp', 'Potential', 'Stockist', 'Prescriber', 'OP Timing', 
     'Call Schedule', 'Prescribing Products', 'Notes', 'Active', 'Updated At'
   ],
@@ -33,7 +33,7 @@ const TAB_SCHEMAS = {
   ]
 };
 
-// Initial default settings to seed if Settings sheet is empty
+// Initial default settings to seed ONLY if a tab is newly created and empty
 const DEFAULT_SETTINGS_MATRIX = {
   'Areas': ['Central Zone', 'North Zone', 'South Zone'],
   'Specialties': [
@@ -44,7 +44,7 @@ const DEFAULT_SETTINGS_MATRIX = {
   'Camps': ['Proddatur', 'Kadapa', 'Jammalamadugu', 'Mydukur', 'Pulivendula'],
   'Potentials': ['Super Core', 'Core', 'High', 'Medium', 'Low'],
   'Stockist': ['Primary', 'Secondary', 'Direct', 'None'],
-  'OP Timing': [
+  'OP Timings': [
     'Morning (9:00 AM - 1:00 PM)',
     'Evening (5:00 PM - 9:00 PM)',
     'Both (Morning & Evening)',
@@ -91,7 +91,10 @@ function getDayName(dateStr) {
 }
 
 /**
- * Ensures all 4 primary sheets and column headers exist without modifying existing data.
+ * Ensures all 4 primary sheets exist non-destructively.
+ * - Leaves existing sheets, headers, and data completely intact.
+ * - Creates only missing tabs with defined headers.
+ * - Never creates Camps, Areas, or Pharmacies tabs.
  */
 function ensureAllSheetsExist() {
   const ss = getSpreadsheet();
@@ -106,7 +109,7 @@ function ensureAllSheetsExist() {
       sheet.setFrozenRows(1);
       createdTabs.push(tabName);
 
-      // Seed Settings sheet matrix
+      // Seed Settings sheet matrix only if newly created
       if (tabName === 'Settings') {
         const maxRows = Math.max(...Object.values(DEFAULT_SETTINGS_MATRIX).map(arr => arr.length));
         const matrixRows = [];
@@ -119,12 +122,12 @@ function ensureAllSheetsExist() {
         }
       }
 
-      // Seed Products sheet
+      // Seed Products sheet only if newly created
       if (tabName === 'Products' && DEFAULT_PRODUCTS.length > 0) {
         sheet.getRange(2, 1, DEFAULT_PRODUCTS.length, 3).setValues(DEFAULT_PRODUCTS);
       }
     } else {
-      // Sheet exists: verify header row
+      // If sheet exists but is completely empty (no columns), add headers
       const lastCol = sheet.getLastColumn();
       if (lastCol === 0) {
         sheet.appendRow(columns);
@@ -146,6 +149,7 @@ function ensureAllSheetsExist() {
           sheet.getRange(2, 1, DEFAULT_PRODUCTS.length, 3).setValues(DEFAULT_PRODUCTS);
         }
       }
+      // If sheet already has data or headers, DO NOT touch or replace anything!
     }
   }
 
@@ -169,14 +173,16 @@ function readSettingsMatrix() {
   const matrix = {};
 
   headers.forEach(h => {
-    matrix[h] = [];
+    if (h) matrix[h] = [];
   });
 
   for (let r = 1; r < values.length; r++) {
     for (let c = 0; c < headers.length; c++) {
+      const headerKey = headers[c];
+      if (!headerKey) continue;
       const cellVal = values[r][c];
       if (cellVal !== '' && cellVal !== null && cellVal !== undefined) {
-        matrix[headers[c]].push(String(cellVal).trim());
+        matrix[headerKey].push(String(cellVal).trim());
       }
     }
   }
@@ -185,7 +191,7 @@ function readSettingsMatrix() {
 }
 
 /**
- * Reads tabular data from sheet
+ * Reads tabular data from sheet preserving existing sheet structure
  */
 function readSheetData(sheetName) {
   const ss = getSpreadsheet();
@@ -207,6 +213,7 @@ function readSheetData(sheetName) {
 
     const item = {};
     for (let c = 0; c < headers.length; c++) {
+      if (!headers[c]) continue;
       let cellValue = row[c];
       if (cellValue instanceof Date) {
         cellValue = cellValue.toISOString();
@@ -280,44 +287,68 @@ function doPost(e) {
       // 1. Sync Doctors (Upsert by ID in Doctors sheet)
       if (Array.isArray(payload.doctors) && payload.doctors.length > 0) {
         const docSheet = ss.getSheetByName('Doctors');
-        const schema = TAB_SCHEMAS['Doctors'];
         const existingValues = docSheet.getDataRange().getValues();
-        const idColIndex = 0; // 'ID' is first column
+        const headers = existingValues.length > 0 ? existingValues[0].map(h => String(h).trim()) : TAB_SCHEMAS['Doctors'];
+        
+        // Map column header name to 0-based column index
+        const colMap = {};
+        headers.forEach((h, idx) => {
+          colMap[h.toLowerCase()] = idx;
+        });
+
+        const idColIdx = colMap['id'] !== undefined ? colMap['id'] : 0;
         const existingIdToRowMap = {};
 
         for (let r = 1; r < existingValues.length; r++) {
-          const rowId = String(existingValues[r][idColIndex]);
+          const rowId = String(existingValues[r][idColIdx]);
           if (rowId) {
             existingIdToRowMap[rowId] = r + 1; // 1-based row index
           }
         }
 
         payload.doctors.forEach(doc => {
-          const rowData = [
-            doc.id || '',
-            doc.name || '',
-            Array.isArray(doc.specialties) ? doc.specialties.join(', ') : (doc.specialties || ''),
-            doc.gender || 'Male',
-            doc.hospital || '',
-            doc.pharmacy || '',
-            doc.area || '',
-            doc.camp || '',
-            doc.potential || '',
-            doc.stockist || '',
-            doc.prescriber || 'Rx',
-            doc.op_timing_custom || doc.op_timing || '',
-            doc.call_schedule_custom || doc.call_schedule || '',
-            doc.prescriber === 'Rx' && Array.isArray(doc.prescribing_products)
-              ? doc.prescribing_products.join(', ')
-              : (doc.prescribing_products || ''),
-            doc.notes || '',
-            doc.is_active !== false ? 'TRUE' : 'FALSE',
-            doc.updated_at || now
-          ];
+          const specialtiesStr = Array.isArray(doc.specialties) 
+            ? doc.specialties.join(', ') 
+            : (doc.specialties || '');
+
+          const prescribingProdsStr = (doc.prescriber === 'Rx' && Array.isArray(doc.prescribing_products))
+            ? doc.prescribing_products.join(', ')
+            : (doc.prescribing_products || '');
+
+          // Build row matching existing sheet headers dynamically
+          const rowData = new Array(headers.length).fill('');
+          
+          const fieldMap = {
+            'id': doc.id || '',
+            'name': doc.name || '',
+            'specialties': specialtiesStr,
+            'hospital': doc.hospital || '',
+            'attached pharmacy': doc.pharmacy || '',
+            'pharmacy': doc.pharmacy || '',
+            'area': doc.area || '',
+            'camp': doc.camp || '',
+            'potential': doc.potential || '',
+            'stockist': doc.stockist || '',
+            'prescriber': doc.prescriber || 'NRx',
+            'op timing': doc.op_timing_custom || doc.op_timing || '',
+            'op timings': doc.op_timing_custom || doc.op_timing || '',
+            'call schedule': doc.call_schedule_custom || doc.call_schedule || '',
+            'prescribing products': prescribingProdsStr,
+            'notes': doc.notes || '',
+            'active': doc.is_active !== false ? 'TRUE' : 'FALSE',
+            'updated at': doc.updated_at || now
+          };
+
+          headers.forEach((h, colIdx) => {
+            const key = h.toLowerCase();
+            if (fieldMap[key] !== undefined) {
+              rowData[colIdx] = fieldMap[key];
+            }
+          });
 
           const docId = String(doc.id);
           if (existingIdToRowMap[docId]) {
-            docSheet.getRange(existingIdToRowMap[docId], 1, 1, schema.length).setValues([rowData]);
+            docSheet.getRange(existingIdToRowMap[docId], 1, 1, headers.length).setValues([rowData]);
           } else {
             docSheet.appendRow(rowData);
             existingIdToRowMap[docId] = docSheet.getLastRow();
@@ -329,7 +360,8 @@ function doPost(e) {
       // 2. Append Visit Bundles (1 Human-Readable Row Per Bundle)
       if (Array.isArray(payload.visit_bundles) && payload.visit_bundles.length > 0) {
         const visitSheet = ss.getSheetByName('Visits');
-        const schema = TAB_SCHEMAS['Visits'];
+        const existingValues = visitSheet.getDataRange().getValues();
+        const headers = existingValues.length > 0 ? existingValues[0].map(h => String(h).trim()) : TAB_SCHEMAS['Visits'];
         const rowsToAppend = [];
 
         payload.visit_bundles.forEach(bundle => {
@@ -358,22 +390,30 @@ function doPost(e) {
             pharmacyCell = '-';
           }
 
-          const rowData = [
-            bundle.date || '',
-            dayName,
-            bundle.camp || '',
-            isHolidayOrSunday ? 0 : (bundle.doctor_count || 0),
-            isHolidayOrSunday ? 0 : (bundle.pharmacy_count || 0),
-            doctorsCell,
-            pharmacyCell
-          ];
+          const fieldMap = {
+            'date': bundle.date || '',
+            'day': dayName,
+            'camp': bundle.camp || '',
+            'doctors (count)': isHolidayOrSunday ? 0 : (bundle.doctor_count || 0),
+            'pharmacy (count)': isHolidayOrSunday ? 0 : (bundle.pharmacy_count || 0),
+            'doctors': doctorsCell,
+            'pharmacy': pharmacyCell
+          };
+
+          const rowData = new Array(headers.length).fill('');
+          headers.forEach((h, colIdx) => {
+            const key = h.toLowerCase();
+            if (fieldMap[key] !== undefined) {
+              rowData[colIdx] = fieldMap[key];
+            }
+          });
 
           rowsToAppend.push(rowData);
         });
 
         if (rowsToAppend.length > 0) {
           const startRow = visitSheet.getLastRow() + 1;
-          visitSheet.getRange(startRow, 1, rowsToAppend.length, schema.length).setValues(rowsToAppend);
+          visitSheet.getRange(startRow, 1, rowsToAppend.length, headers.length).setValues(rowsToAppend);
           results.visits_logged = rowsToAppend.length;
         }
       }

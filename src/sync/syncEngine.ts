@@ -205,20 +205,21 @@ class SyncEngine {
           doctorsToPush.push({
             id: doc.id,
             name: doc.name,
-            specialties: doc.specialties,
-            gender: doc.gender || 'Male',
+            specialties: Array.isArray(doc.specialties) ? doc.specialties.join(', ') : (doc.specialties || ''),
             hospital: doc.hospital || '',
             pharmacy: doc.pharmacy || '',
             area: doc.area || '',
             camp: doc.camp || '',
             potential: doc.potential || '',
             stockist: doc.stockist || '',
-            prescriber: doc.prescriber || 'Rx',
+            prescriber: doc.prescriber || 'NRx',
             op_timing: doc.op_timing || '',
             op_timing_custom: doc.op_timing_custom || '',
             call_schedule: doc.call_schedule || '',
             call_schedule_custom: doc.call_schedule_custom || '',
-            prescribing_products: doc.prescribing_products || [],
+            prescribing_products: doc.prescriber === 'Rx' && Array.isArray(doc.prescribing_products)
+              ? doc.prescribing_products.join(', ')
+              : (doc.prescribing_products || ''),
             notes: doc.notes || '',
             is_active: doc.is_active !== false,
             updated_at: doc.updated_at || new Date().toISOString(),
@@ -307,7 +308,7 @@ class SyncEngine {
    * Safely merge spreadsheet data into IndexedDB
    */
   private async mergePulledData(data: any): Promise<void> {
-    // 1. Settings Matrix: Areas, Specialties, Camps, Potentials, Stockist, OP Timing, Call Schedule
+    // 1. Settings Matrix: Areas, Specialties, Camps, Potentials, Stockist, OP Timings, Call Schedule
     if (data.settings_matrix && typeof data.settings_matrix === 'object') {
       const matrix = data.settings_matrix;
       const categoryMapping: Record<string, string> = {
@@ -316,6 +317,7 @@ class SyncEngine {
         'Camps': 'Camp',
         'Potentials': 'Potential',
         'Stockist': 'Stockist',
+        'OP Timings': 'OP Timing',
         'OP Timing': 'OP Timing',
         'Call Schedule': 'Call Schedule',
       };
@@ -407,7 +409,11 @@ class SyncEngine {
         const rawSpecs = d.Specialties || d.specialties;
         if (typeof rawSpecs === 'string') {
           try {
-            specialties = JSON.parse(rawSpecs);
+            if (rawSpecs.trim().startsWith('[')) {
+              specialties = JSON.parse(rawSpecs);
+            } else {
+              specialties = rawSpecs.split(',').map((s: string) => s.trim()).filter(Boolean);
+            }
           } catch {
             specialties = rawSpecs.split(',').map((s: string) => s.trim()).filter(Boolean);
           }
@@ -419,7 +425,11 @@ class SyncEngine {
         const rawProds = d['Prescribing Products'] || d.prescribing_products;
         if (typeof rawProds === 'string') {
           try {
-            prescribingProducts = JSON.parse(rawProds);
+            if (rawProds.trim().startsWith('[')) {
+              prescribingProducts = JSON.parse(rawProds);
+            } else {
+              prescribingProducts = rawProds.split(',').map((s: string) => s.trim()).filter(Boolean);
+            }
           } catch {
             prescribingProducts = rawProds.split(',').map((s: string) => s.trim()).filter(Boolean);
           }
@@ -427,14 +437,13 @@ class SyncEngine {
           prescribingProducts = rawProds;
         }
 
-        const rawPrescriber = String(d.Prescriber || d.prescriber || 'Rx').trim();
-        const prescriber = rawPrescriber.toUpperCase().includes('NRX') ? 'NRx' : 'Rx';
+        const rawPrescriber = String(d.Prescriber || d.prescriber || 'NRx').trim();
+        const prescriber = rawPrescriber.toUpperCase() === 'RX' ? 'Rx' : 'NRx';
 
         const doctor: Doctor = {
           id: String(docId),
           name: String(docName).trim(),
           specialties,
-          gender: d.Gender || d.gender || 'Male',
           hospital: d.Hospital || d.hospital || '',
           pharmacy: d['Attached Pharmacy'] || d.pharmacy || '',
           area: d.Area || d.area || '',
@@ -442,7 +451,7 @@ class SyncEngine {
           potential: d.Potential || d.potential || 'High',
           stockist: d.Stockist || d.stockist || 'Primary',
           prescriber,
-          op_timing: d['OP Timing'] || d.op_timing || 'Morning (9:00 AM - 1:00 PM)',
+          op_timing: d['OP Timings'] || d['OP Timing'] || d.op_timing || 'Morning (9:00 AM - 1:00 PM)',
           op_timing_custom: d.op_timing_custom || '',
           call_schedule: d['Call Schedule'] || d.call_schedule || 'Weekly',
           call_schedule_custom: d.call_schedule_custom || '',

@@ -1,9 +1,8 @@
-export type Gender = 'Male' | 'Female' | 'Other';
 export type PrescriberType = 'Rx' | 'NRx';
 
 export interface SettingItem {
   id?: number;
-  category: 'Specialty' | 'Potential' | 'Stockist' | 'Prescriber' | 'OP Timing' | 'Call Schedule' | 'Area' | 'Camp' | 'Gender' | string;
+  category: 'Specialty' | 'Potential' | 'Stockist' | 'Prescriber' | 'OP Timings' | 'Call Schedule' | 'Area' | 'Camp' | string;
   value: string;
   order_index: number;
   description?: string;
@@ -15,7 +14,6 @@ export interface Doctor {
   id: string; // UUID or string
   name: string;
   specialties: string[]; // multi-select from Settings
-  gender?: Gender | string;
   hospital?: string;
   pharmacy?: string; // from doctor linked pharmacy / master data
   area: string; // from Areas master data

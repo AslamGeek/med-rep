@@ -80,7 +80,7 @@ export const DEFAULT_MASTER_DATA = {
     { category: 'Prescriber', value: 'Rx', order_index: 1, active: true },
     { category: 'Prescriber', value: 'NRx', order_index: 2, active: true },
 
-    // OP Timing
+    // OP Timings
     { category: 'OP Timing', value: 'Morning (9:00 AM - 1:00 PM)', order_index: 1, active: true },
     { category: 'OP Timing', value: 'Evening (5:00 PM - 9:00 PM)', order_index: 2, active: true },
     { category: 'OP Timing', value: 'Both (Morning & Evening)', order_index: 3, active: true },

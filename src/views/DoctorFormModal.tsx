@@ -26,28 +26,25 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
 }) => {
   const { showToast } = useToast();
 
-  // Form State
+  // Form State - Mandatory Fields
   const [name, setName] = useState('');
   const [nameError, setNameError] = useState('');
   const [specialties, setSpecialties] = useState<string[]>([]);
-  const [gender, setGender] = useState('Male');
-  const [notes, setNotes] = useState('');
+  const [camp, setCamp] = useState('');
+  const [prescriber, setPrescriber] = useState<'Rx' | 'NRx'>('NRx');
+  const [prescribingProducts, setPrescribingProducts] = useState<string[]>([]);
 
+  // Form State - Optional Fields
   const [hospital, setHospital] = useState('');
   const [pharmacy, setPharmacy] = useState('');
   const [area, setArea] = useState('');
-  const [camp, setCamp] = useState('');
-
   const [potential, setPotential] = useState('');
   const [stockist, setStockist] = useState('');
-  const [prescriber, setPrescriber] = useState<'Rx' | 'NRx'>('Rx');
-
   const [opTiming, setOpTiming] = useState('');
   const [opTimingCustom, setOpTimingCustom] = useState('');
   const [callSchedule, setCallSchedule] = useState('');
   const [callScheduleCustom, setCallScheduleCustom] = useState('');
-
-  const [prescribingProducts, setPrescribingProducts] = useState<string[]>([]);
+  const [notes, setNotes] = useState('');
 
   // Master Data Options
   const [specialtyOptions, setSpecialtyOptions] = useState<SettingItem[]>([]);
@@ -89,8 +86,8 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
 
       // Set initial defaults for new doctor
       if (!doctorToEdit) {
-        if (ars.length > 0 && !area) setArea(ars[0].name);
         if (cmps.length > 0 && !camp) setCamp(cmps[0].name);
+        if (ars.length > 0 && !area) setArea(ars[0].name);
         if (pot.length > 0 && !potential) setPotential(pot[0].value);
         if (stk.length > 0 && !stockist) setStockist(stk[0].value);
         if (op.length > 0 && !opTiming) setOpTiming(op[0].value);
@@ -108,14 +105,13 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
     if (doctorToEdit) {
       setName(doctorToEdit.name || '');
       setSpecialties(doctorToEdit.specialties || []);
-      setGender(doctorToEdit.gender || 'Male');
       setHospital(doctorToEdit.hospital || '');
       setPharmacy(doctorToEdit.pharmacy || '');
       setArea(doctorToEdit.area || '');
       setCamp(doctorToEdit.camp || '');
       setPotential(doctorToEdit.potential || '');
       setStockist(doctorToEdit.stockist || '');
-      setPrescriber(doctorToEdit.prescriber === 'NRx' ? 'NRx' : 'Rx');
+      setPrescriber(doctorToEdit.prescriber === 'Rx' ? 'Rx' : 'NRx');
       setOpTiming(doctorToEdit.op_timing || '');
       setOpTimingCustom(doctorToEdit.op_timing_custom || '');
       setCallSchedule(doctorToEdit.call_schedule || '');
@@ -125,10 +121,9 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
     } else {
       setName('');
       setSpecialties([]);
-      setGender('Male');
       setHospital('');
       setPharmacy('');
-      setPrescriber('Rx');
+      setPrescriber('NRx');
       setOpTimingCustom('');
       setCallScheduleCustom('');
       setPrescribingProducts([]);
@@ -207,7 +202,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
         id: doctorToEdit?.id,
         name,
         specialties,
-        gender,
         hospital,
         pharmacy,
         area: area || (allAreas[0]?.name ?? ''),
@@ -261,8 +255,15 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
 
         {/* Form Body */}
         <form id="doctor-form" onSubmit={handleSubmit} className="modal-body">
-          {/* 1. BASIC INFORMATION */}
+          {/* ============================================================== */}
+          {/* 1. MANDATORY FIELDS (FIRST FOR QUICK SAVING)                   */}
+          {/* ============================================================== */}
           <div style={{ marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '12px', fontWeight: '700', color: 'var(--accent-text)', textTransform: 'uppercase', marginBottom: '10px' }}>
+              Required Information
+            </h3>
+
+            {/* Doctor Name */}
             <div className="form-group">
               <label className="form-label">
                 Doctor Name <span style={{ color: 'var(--danger-text)' }}>*</span>
@@ -272,6 +273,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                 className={`form-input ${nameError ? 'is-invalid' : ''}`}
                 value={name}
                 onChange={handleNameChange}
+                placeholder="Dr. Full Name"
                 required
                 autoComplete="off"
               />
@@ -283,6 +285,27 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
               )}
             </div>
 
+            {/* Camp */}
+            <div className="form-group">
+              <label className="form-label">
+                Camp <span style={{ color: 'var(--danger-text)' }}>*</span>
+              </label>
+              <select
+                className="form-select"
+                value={camp}
+                onChange={e => setCamp(e.target.value)}
+                required
+              >
+                <option value="">Select Camp</option>
+                {availableCamps.map(c => (
+                  <option key={c.id} value={c.name}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Specialty */}
             <div className="form-group">
               <label className="form-label">
                 Specialty <span style={{ color: 'var(--danger-text)' }}>*</span>
@@ -307,62 +330,67 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
               )}
             </div>
 
+            {/* Prescriber: Strictly NRx (Default) or Rx */}
             <div className="form-group">
-              <label className="form-label">Gender</label>
-              <select
-                className="form-select"
-                value={gender}
-                onChange={e => setGender(e.target.value)}
-              >
-                <option value="Male">Male</option>
-                <option value="Female">Female</option>
-                <option value="Other">Other</option>
-              </select>
+              <label className="form-label">
+                Prescriber Status <span style={{ color: 'var(--danger-text)' }}>*</span>
+              </label>
+              <div className="pill-grid">
+                {(['NRx', 'Rx'] as const).map(p => {
+                  const isSelected = prescriber === p;
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      className={`pill-item ${isSelected ? 'selected' : ''}`}
+                      onClick={() => handlePrescriberChange(p)}
+                      style={{ flex: 1, textAlign: 'center', padding: '8px 12px', fontWeight: isSelected ? '700' : '500' }}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
+            {/* Prescribing Products: Visible ONLY when Prescriber = Rx */}
+            {prescriber === 'Rx' && (
+              <div className="form-group" style={{ marginTop: '10px' }}>
+                <label className="form-label">
+                  Prescribing Products (from Products Master)
+                </label>
+                {allProducts.length === 0 ? (
+                  <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No products in catalog</p>
+                ) : (
+                  <div className="pill-grid">
+                    {allProducts.map(prod => {
+                      const isSelected = prescribingProducts.includes(prod.name);
+                      return (
+                        <button
+                          key={prod.id}
+                          type="button"
+                          className={`pill-item ${isSelected ? 'selected' : ''}`}
+                          onClick={() => toggleProduct(prod.name)}
+                        >
+                          {prod.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {/* 2. LOCATION & PHARMACY */}
-          <div style={{ marginBottom: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: '700', color: 'var(--accent-text)', marginBottom: '10px' }}>
-              LOCATION & ATTACHMENT
+          {/* ============================================================== */}
+          {/* 2. OPTIONAL & ADDITIONAL DETAILS                               */}
+          {/* ============================================================== */}
+          <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '14px', marginBottom: '16px' }}>
+            <h3 style={{ fontSize: '12px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '10px' }}>
+              Optional & Additional Details
             </h3>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <div className="form-group">
-                <label className="form-label">Area</label>
-                <select
-                  className="form-select"
-                  value={area}
-                  onChange={e => setArea(e.target.value)}
-                >
-                  {allAreas.map(a => (
-                    <option key={a.id} value={a.name}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">
-                  Camp <span style={{ color: 'var(--danger-text)' }}>*</span>
-                </label>
-                <select
-                  className="form-select"
-                  value={camp}
-                  onChange={e => setCamp(e.target.value)}
-                  required
-                >
-                  <option value="">Select Camp</option>
-                  {availableCamps.map(c => (
-                    <option key={c.id} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
+            {/* Hospital & Attached Pharmacy */}
             <div className="form-group">
               <label className="form-label">Hospital / Clinic</label>
               <input
@@ -370,6 +398,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                 className="form-input"
                 value={hospital}
                 onChange={e => setHospital(e.target.value)}
+                placeholder="Clinic / Hospital name"
               />
             </div>
 
@@ -388,15 +417,24 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                 ))}
               </select>
             </div>
-          </div>
 
-          {/* 3. CLASSIFICATION */}
-          <div style={{ marginBottom: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: '700', color: 'var(--accent-text)', marginBottom: '10px' }}>
-              CLASSIFICATION & VALUE
-            </h3>
-
+            {/* Area, Potential, Stockist */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div className="form-group">
+                <label className="form-label">Area</label>
+                <select
+                  className="form-select"
+                  value={area}
+                  onChange={e => setArea(e.target.value)}
+                >
+                  {allAreas.map(a => (
+                    <option key={a.id} value={a.name}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="form-group">
                 <label className="form-label">Potential</label>
                 <select
@@ -411,53 +449,24 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                   ))}
                 </select>
               </div>
-
-              <div className="form-group">
-                <label className="form-label">Stockist</label>
-                <select
-                  className="form-select"
-                  value={stockist}
-                  onChange={e => setStockist(e.target.value)}
-                >
-                  {stockistOptions.map(s => (
-                    <option key={s.value} value={s.value}>
-                      {s.value}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
 
-            {/* Prescriber: Strictly Rx or NRx */}
             <div className="form-group">
-              <label className="form-label">
-                Prescriber Status <span style={{ color: 'var(--danger-text)' }}>*</span>
-              </label>
-              <div className="pill-grid">
-                {(['Rx', 'NRx'] as const).map(p => {
-                  const isSelected = prescriber === p;
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      className={`pill-item ${isSelected ? 'selected' : ''}`}
-                      onClick={() => handlePrescriberChange(p)}
-                      style={{ flex: 1, textAlign: 'center', padding: '8px 12px' }}
-                    >
-                      {p}
-                    </button>
-                  );
-                })}
-              </div>
+              <label className="form-label">Stockist</label>
+              <select
+                className="form-select"
+                value={stockist}
+                onChange={e => setStockist(e.target.value)}
+              >
+                {stockistOptions.map(s => (
+                  <option key={s.value} value={s.value}>
+                    {s.value}
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
 
-          {/* 4. AVAILABILITY & TIMINGS */}
-          <div style={{ marginBottom: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: '700', color: 'var(--accent-text)', marginBottom: '10px' }}>
-              AVAILABILITY & TIMINGS
-            </h3>
-
+            {/* OP Timing & Call Schedule */}
             <div className="form-group">
               <label className="form-label">OP Timing</label>
               <select
@@ -481,6 +490,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                   className="form-input"
                   value={opTimingCustom}
                   onChange={e => setOpTimingCustom(e.target.value)}
+                  placeholder="e.g. 11:00 AM - 3:00 PM"
                 />
               </div>
             )}
@@ -508,37 +518,12 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                   className="form-input"
                   value={callScheduleCustom}
                   onChange={e => setCallScheduleCustom(e.target.value)}
+                  placeholder="e.g. Every Friday"
                 />
               </div>
             )}
-          </div>
 
-          {/* 5. PRESCRIBING PRODUCTS (Visible ONLY when Prescriber = Rx) */}
-          {prescriber === 'Rx' && (
-            <div style={{ marginBottom: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
-              <h3 style={{ fontSize: '13px', fontWeight: '700', color: 'var(--accent-text)', marginBottom: '6px' }}>
-                PRESCRIBING PRODUCTS
-              </h3>
-              <div className="pill-grid">
-                {allProducts.map(prod => {
-                  const isSelected = prescribingProducts.includes(prod.name);
-                  return (
-                    <button
-                      key={prod.id}
-                      type="button"
-                      className={`pill-item ${isSelected ? 'selected' : ''}`}
-                      onClick={() => toggleProduct(prod.name)}
-                    >
-                      {prod.name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* 6. NOTES */}
-          <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
+            {/* Doctor Notes */}
             <div className="form-group">
               <label className="form-label">Doctor Notes</label>
               <textarea
@@ -546,6 +531,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                 rows={2}
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
+                placeholder="Preferences, key details, or visit instructions..."
               />
             </div>
           </div>

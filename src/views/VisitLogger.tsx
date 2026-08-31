@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Calendar,
   MapPin,
@@ -76,14 +76,30 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Timer ref to trigger auto-sync after undo window
-  const syncTimeoutRef = useRef<number | null>(null);
-
   // Auto-detect Sunday on date changes
   const handleDateChange = (newDate: string) => {
+    // Disallow past dates
+    if (newDate < todayISO) {
+      setSelectedDate(todayISO);
+      showToast('Past dates cannot be selected', 'info');
+      return;
+    }
     setSelectedDate(newDate);
     if (checkIsSunday(newDate)) {
       setSelectedDoctorIds(new Set());
+    }
+  };
+
+  // Helper to advance date to tomorrow if saved date was today
+  const advanceDateIfToday = (savedDate: string) => {
+    if (savedDate === todayISO) {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      const nextYear = d.getFullYear();
+      const nextMonth = String(d.getMonth() + 1).padStart(2, '0');
+      const nextDay = String(d.getDate()).padStart(2, '0');
+      const tomorrowISO = `${nextYear}-${nextMonth}-${nextDay}`;
+      setSelectedDate(tomorrowISO);
     }
   };
 
@@ -133,15 +149,6 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
   useEffect(() => {
     loadCampData();
   }, [loadCampData]);
-
-  // Clean up timer on unmount
-  useEffect(() => {
-    return () => {
-      if (syncTimeoutRef.current) {
-        clearTimeout(syncTimeoutRef.current);
-      }
-    };
-  }, []);
 
   // Filtered doctors for in-camp search
   const filteredDoctors = useMemo(() => {
@@ -212,6 +219,8 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
       return;
     }
 
+    const savedDate = selectedDate;
+
     if (isRestrictedDay) {
       // For Sunday or Holiday, create bundle without doctors
       setIsSaving(true);
@@ -229,6 +238,9 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
         const prevHolidayState = isHoliday;
         const savedCamp = selectedCamp;
 
+        // Advance date to tomorrow if logged for today
+        advanceDateIfToday(savedDate);
+
         // Provide 3s Undo confirmation
         showToast(
           `Logged ${tagToSave.toUpperCase()} for ${selectedCamp}`,
@@ -240,6 +252,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
               await undoVisitBundle(bundle.id);
               setIsHoliday(prevHolidayState);
               setSelectedCamp(savedCamp);
+              setSelectedDate(savedDate);
               showToast('Holiday entry undone', 'info');
             },
           }
@@ -249,11 +262,8 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
         setIsPreviewOpen(false);
         onVisitLoggedSuccessfully(bundle.id);
 
-        // Auto-sync after 3 seconds if not undone
-        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-        syncTimeoutRef.current = window.setTimeout(() => {
-          syncEngine.checkPendingAndSync();
-        }, 3200);
+        // Auto-sync immediately in background
+        syncEngine.checkPendingAndSync();
       } catch (err: any) {
         showToast('Error saving bundle: ' + err.message, 'error');
       } finally {
@@ -280,6 +290,9 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
         pharmacyIds: derivedPharmacies.map(p => p.id),
       });
 
+      // Advance date to tomorrow if logged for today
+      advanceDateIfToday(savedDate);
+
       // Clear selection immediately on successful save
       setSelectedDoctorIds(new Set());
       setIsPreviewOpen(false);
@@ -293,9 +306,10 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
           label: 'Undo',
           onClick: async () => {
             await undoVisitBundle(bundle.id);
-            // Restore selection so user can immediately correct without navigating
+            // Restore selection and date so user can immediately correct without navigating
             setSelectedDoctorIds(savedDocIds);
             setSelectedCamp(savedCamp);
+            setSelectedDate(savedDate);
             loadCampData();
             showToast('Bundle creation undone', 'info');
           },
@@ -306,11 +320,8 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
       loadCampData();
       onVisitLoggedSuccessfully(bundle.id);
 
-      // Auto-sync after 3 seconds if not undone
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-      syncTimeoutRef.current = window.setTimeout(() => {
-        syncEngine.checkPendingAndSync();
-      }, 3200);
+      // Auto-sync immediately in background
+      syncEngine.checkPendingAndSync();
     } catch (err: any) {
       showToast('Error saving visit bundle: ' + err.message, 'error');
     } finally {
@@ -353,6 +364,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
               type="date"
               className="form-input"
               value={selectedDate}
+              min={todayISO}
               onChange={e => handleDateChange(e.target.value)}
             />
           </div>
