@@ -65,8 +65,10 @@ export const App: React.FC = () => {
     async function setup() {
       await initializeDatabase();
       setIsDbReady(true);
-      // Run background sync check
-      syncEngine.checkPendingAndSync();
+      // Show cached data immediately (isDbReady above unblocks render),
+      // then trigger a full background sync (push pending + pull + reconcile)
+      // on every app open — not just when there happen to be pending items.
+      syncEngine.syncNow();
     }
     setup();
 

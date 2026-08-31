@@ -369,6 +369,8 @@ class SyncEngine {
 
     // 2. Products Sheet: ProdID, Name, DosageForm
     if (Array.isArray(data.products) && data.products.length > 0) {
+      const pulledProductIds = new Set<string>();
+
       for (const p of data.products) {
         const prodId = p.ProdID || p.prod_id || p.id;
         const prodName = p.Name || p.name;
@@ -376,14 +378,31 @@ class SyncEngine {
 
         if (!prodId || !prodName) continue;
 
+        const cleanId = String(prodId).trim();
+        pulledProductIds.add(cleanId);
+
         const prod: Product = {
-          id: String(prodId).trim(),
+          id: cleanId,
           name: String(prodName).trim(),
           form: String(dosageForm).trim(),
           active: true,
           updated_at: new Date().toISOString(),
         };
         await db.products.put(prod);
+      }
+
+      // Reconcile: soft-delete local products no longer present in the pull.
+      const allLocalProducts = await db.products.toArray();
+      const staleProductIds = allLocalProducts
+        .map(p => p.id)
+        .filter(id => !pulledProductIds.has(id));
+
+      if (staleProductIds.length > 0) {
+        const now = new Date().toISOString();
+        await db.products
+          .where('id')
+          .anyOf(staleProductIds)
+          .modify({ active: false, updated_at: now });
       }
     }
 
@@ -481,6 +500,26 @@ class SyncEngine {
             await db.pharmacies.put(ph);
           }
         }
+      }
+
+      // Reconcile: soft-delete local doctors no longer present in the pull,
+      // but never touch doctors with pending unsynced local edits.
+      const pulledDoctorIds = new Set(
+        data.doctors
+          .map((d: any) => String(d.ID || d.id || ''))
+          .filter(Boolean)
+      );
+      const allLocalDoctors = await db.doctors.toArray();
+      const staleDoctorIds = allLocalDoctors
+        .map(d => d.id)
+        .filter(id => !pulledDoctorIds.has(id) && !pendingDoctorIds.has(id));
+
+      if (staleDoctorIds.length > 0) {
+        const now = new Date().toISOString();
+        await db.doctors
+          .where('id')
+          .anyOf(staleDoctorIds)
+          .modify({ is_active: false, updated_at: now });
       }
     }
   }

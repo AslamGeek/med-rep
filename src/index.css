@@ -701,6 +701,11 @@ input, textarea, select {
   to { transform: translateY(0); opacity: 1; }
 }
 
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

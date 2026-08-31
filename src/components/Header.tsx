@@ -1,5 +1,7 @@
-import React from 'react';
-import { Sun, Moon, Stethoscope } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Sun, Moon, Stethoscope, RefreshCw } from 'lucide-react';
+import { syncEngine } from '../sync/syncEngine';
+import { useToast } from './Toast';
 
 interface HeaderProps {
   theme: 'dark' | 'light';
@@ -12,6 +14,21 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTheme,
   hidden = false,
 }) => {
+  const [isSyncing, setIsSyncing] = useState(false);
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    const unsub = syncEngine.subscribe(info => {
+      setIsSyncing(info.state === 'syncing');
+    });
+    return () => unsub();
+  }, []);
+
+  const handleManualSync = async () => {
+    const result = await syncEngine.syncNow();
+    showToast(result.message, result.success ? 'success' : 'error');
+  };
+
   return (
     <header className={`app-header ${hidden ? 'header-hidden' : ''}`} aria-hidden={hidden}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -36,6 +53,19 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+        <button
+          className="btn btn-ghost btn-icon"
+          onClick={handleManualSync}
+          disabled={isSyncing}
+          title="Sync Now"
+          aria-label="Sync Now"
+          style={{ width: '36px', height: '36px' }}
+        >
+          <RefreshCw
+            size={17}
+            style={{ animation: isSyncing ? 'spin 1s linear infinite' : 'none' }}
+          />
+        </button>
         <button
           className="btn btn-ghost btn-icon"
           onClick={onToggleTheme}
