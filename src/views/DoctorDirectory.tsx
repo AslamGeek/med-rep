@@ -25,6 +25,7 @@ import {
 import { DoctorFormModal } from './DoctorFormModal';
 import { DoctorDetailModal } from './DoctorDetailModal';
 import { useToast } from '../components/Toast';
+import { syncEngine } from '../sync/syncEngine';
 
 interface DoctorDirectoryProps {
   onSelectDoctorForVisit?: (doctor: Doctor) => void;
@@ -123,6 +124,21 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
 
   useEffect(() => {
     loadData();
+  }, [loadData]);
+
+  // Re-fetch from IndexedDB whenever a background/manual sync completes,
+  // so the list reflects fresh data without requiring a tab switch.
+  useEffect(() => {
+    let wasSyncing = false;
+    const unsub = syncEngine.subscribe(info => {
+      const isSyncingNow = info.state === 'syncing';
+      if (wasSyncing && !isSyncingNow) {
+        // Sync just finished (success or error) — reload from IndexedDB.
+        loadData();
+      }
+      wasSyncing = isSyncingNow;
+    });
+    return () => unsub();
   }, [loadData]);
 
   // Directory Metrics (Computed across active doctors only)
