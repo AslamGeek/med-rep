@@ -5,13 +5,12 @@ import {
   Search,
   CheckSquare,
   Square,
-  Users,
-  Pill,
   Clock,
   X,
   ChevronUp,
   ChevronDown,
   Send,
+  Building2,
 } from 'lucide-react';
 import type { Camp, Pharmacy, VisitTag } from '../types';
 import {
@@ -35,6 +34,14 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
 }) => {
   const { showToast } = useToast();
 
+  // Helper to check if date is Sunday
+  const checkIsSunday = (dateStr: string): boolean => {
+    if (!dateStr) return false;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    return date.getDay() === 0;
+  };
+
   // Date setup: YYYY-MM-DD for today
   const todayISO = useMemo(() => {
     const d = new Date();
@@ -47,7 +54,9 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
   // Form Controls
   const [selectedDate, setSelectedDate] = useState<string>(todayISO);
   const [selectedCamp, setSelectedCamp] = useState<string>('');
-  const [selectedTag, setSelectedTag] = useState<VisitTag>('normal');
+  const [selectedTag, setSelectedTag] = useState<VisitTag>(() => {
+    return checkIsSunday(todayISO) ? 'sunday' : 'normal';
+  });
 
   // Master Data
   const [camps, setCamps] = useState<Camp[]>([]);
@@ -58,16 +67,27 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
   // In-camp search query
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Selected IDs for visit bundle
+  // Selected Doctor IDs for visit bundle
   const [selectedDoctorIds, setSelectedDoctorIds] = useState<Set<string>>(new Set());
-  const [selectedPharmacyIds, setSelectedPharmacyIds] = useState<Set<string>>(new Set());
-
-  // Active view tab: 'doctors' | 'pharmacies'
-  const [activeTab, setActiveTab] = useState<'doctors' | 'pharmacies'>('doctors');
 
   // Live Preview drawer state
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Auto-detect Sunday on date changes
+  const handleDateChange = (newDate: string) => {
+    setSelectedDate(newDate);
+    if (checkIsSunday(newDate)) {
+      setSelectedTag('sunday');
+      setSelectedDoctorIds(new Set());
+    } else if (selectedTag === 'sunday') {
+      setSelectedTag('normal');
+    }
+  };
+
+  const isSunday = selectedTag === 'sunday' || checkIsSunday(selectedDate);
+  const isLeave = selectedTag === 'leave';
+  const isRestricted = isSunday || isLeave;
 
   // Load Camps
   useEffect(() => {
@@ -112,7 +132,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
     loadCampData();
   }, [loadCampData]);
 
-  // Filtered lists for in-camp search
+  // Filtered doctors for in-camp search
   const filteredDoctors = useMemo(() => {
     if (!searchQuery.trim()) return doctors;
     const q = searchQuery.toLowerCase().trim();
@@ -126,19 +146,9 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
     });
   }, [doctors, searchQuery]);
 
-  const filteredPharmacies = useMemo(() => {
-    if (!searchQuery.trim()) return pharmacies;
-    const q = searchQuery.toLowerCase().trim();
-    return pharmacies.filter(p => {
-      return (
-        p.name.toLowerCase().includes(q) ||
-        (p.contact_person && p.contact_person.toLowerCase().includes(q))
-      );
-    });
-  }, [pharmacies, searchQuery]);
-
   // Toggle Doctor selection
   const toggleDoctor = (id: string) => {
+    if (isRestricted) return;
     setSelectedDoctorIds(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -150,44 +160,53 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
     });
   };
 
-  // Toggle Pharmacy selection
-  const togglePharmacy = (id: string) => {
-    setSelectedPharmacyIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  // Select All / Clear All for active tab
+  // Select All / Clear All
   const handleSelectAll = () => {
-    if (activeTab === 'doctors') {
-      setSelectedDoctorIds(new Set(filteredDoctors.map(d => d.id)));
-    } else {
-      setSelectedPharmacyIds(new Set(filteredPharmacies.map(p => p.id)));
-    }
+    if (isRestricted) return;
+    setSelectedDoctorIds(new Set(filteredDoctors.map(d => d.id)));
   };
 
   const handleClearAll = () => {
-    if (activeTab === 'doctors') {
-      setSelectedDoctorIds(new Set());
-    } else {
-      setSelectedPharmacyIds(new Set());
-    }
+    setSelectedDoctorIds(new Set());
   };
 
   // One-tap quick tag toggler
   const handleTagToggle = (tag: VisitTag) => {
-    if (selectedTag === tag) {
-      setSelectedTag('normal');
+    if (tag === 'sunday') {
+      // Sunday is governed by date, but if toggled, enforce restrictions
+      setSelectedTag(prev => (prev === 'sunday' ? 'normal' : 'sunday'));
+      setSelectedDoctorIds(new Set());
+    } else if (tag === 'leave') {
+      setSelectedTag(prev => (prev === 'leave' ? 'normal' : 'leave'));
+      setSelectedDoctorIds(new Set());
     } else {
-      setSelectedTag(tag);
+      setSelectedTag(prev => (prev === tag ? 'normal' : tag));
     }
   };
+
+  // Selected doctors list for preview & deriving linked pharmacies
+  const selectedDoctorsList = useMemo(() => {
+    return doctors.filter(d => selectedDoctorIds.has(d.id));
+  }, [doctors, selectedDoctorIds]);
+
+  // Automatically derive linked pharmacies from selected doctors (unique)
+  const derivedPharmacies = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    selectedDoctorsList.forEach(doc => {
+      if (doc.pharmacy && doc.pharmacy.trim()) {
+        const phName = doc.pharmacy.trim();
+        const key = phName.toLowerCase();
+        if (!map.has(key)) {
+          const matched = pharmacies.find(p => p.name.toLowerCase() === key);
+          map.set(key, {
+            id: matched?.id || `ph_${key.replace(/[^a-z0-9]/g, '_')}`,
+            name: matched?.name || phName,
+          });
+        }
+      }
+    });
+    return Array.from(map.values());
+  }, [selectedDoctorsList, pharmacies]);
 
   // Save the entire visit bundle
   const handleSaveVisitBundle = async () => {
@@ -201,9 +220,36 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
       return;
     }
 
-    const totalSelected = selectedDoctorIds.size + selectedPharmacyIds.size;
-    if (totalSelected === 0 && selectedTag === 'normal') {
-      showToast('Please select at least one doctor, pharmacy, or holiday/leave tag', 'error');
+    if (isRestricted) {
+      // For Sunday or Leave, save empty visit day bundle
+      setIsSaving(true);
+      try {
+        const bundle = await createVisitBundle({
+          date: selectedDate,
+          camp: selectedCamp,
+          tag: selectedTag,
+          doctorIds: [],
+          pharmacyIds: [],
+        });
+
+        showToast(
+          `Logged ${selectedTag.toUpperCase()} for ${selectedCamp}`,
+          'success'
+        );
+
+        setSelectedDoctorIds(new Set());
+        setIsPreviewOpen(false);
+        onVisitLoggedSuccessfully(bundle.id);
+      } catch (err: any) {
+        showToast('Error saving bundle: ' + err.message, 'error');
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
+    if (selectedDoctorIds.size === 0 && selectedTag === 'normal') {
+      showToast('Please select at least one doctor to log a visit', 'error');
       return;
     }
 
@@ -214,17 +260,16 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
         camp: selectedCamp,
         tag: selectedTag,
         doctorIds: Array.from(selectedDoctorIds),
-        pharmacyIds: Array.from(selectedPharmacyIds),
+        pharmacyIds: derivedPharmacies.map(p => p.id),
       });
 
       showToast(
-        `Bundle saved: ${bundle.doctor_count} doctors, ${bundle.pharmacy_count} pharmacies`,
+        `Bundle saved: ${bundle.doctor_count} doctors · ${bundle.pharmacy_count} linked pharmacies`,
         'success'
       );
 
       // Reset selection
       setSelectedDoctorIds(new Set());
-      setSelectedPharmacyIds(new Set());
       setIsPreviewOpen(false);
       setSelectedTag('normal');
 
@@ -238,17 +283,6 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
       setIsSaving(false);
     }
   };
-
-  // Selected lists for preview
-  const selectedDoctorsList = useMemo(() => {
-    return doctors.filter(d => selectedDoctorIds.has(d.id));
-  }, [doctors, selectedDoctorIds]);
-
-  const selectedPharmaciesList = useMemo(() => {
-    return pharmacies.filter(p => selectedPharmacyIds.has(p.id));
-  }, [pharmacies, selectedPharmacyIds]);
-
-  const totalSelectionCount = selectedDoctorIds.size + selectedPharmacyIds.size;
 
   return (
     <div className="main-content" style={{ paddingBottom: '140px' }}>
@@ -266,7 +300,6 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
               onChange={e => {
                 setSelectedCamp(e.target.value);
                 setSelectedDoctorIds(new Set());
-                setSelectedPharmacyIds(new Set());
               }}
             >
               {camps.map(c => (
@@ -287,7 +320,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
               className="form-input"
               value={selectedDate}
               min={todayISO}
-              onChange={e => setSelectedDate(e.target.value)}
+              onChange={e => handleDateChange(e.target.value)}
             />
           </div>
         </div>
@@ -295,7 +328,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
         {/* One-Tap Quick Tags (Sunday, Holiday, Leave) */}
         <div>
           <span className="form-label" style={{ display: 'block', marginBottom: '6px', fontSize: '11px' }}>
-            Day Type / Fast Tag
+            Day Type
           </span>
           <div style={{ display: 'flex', gap: '6px' }}>
             <button
@@ -326,187 +359,165 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
         </div>
       </div>
 
-      {/* 2. DOCTOR & PHARMACY TAB TOGGLE & SEARCH */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-        <button
-          className={`btn ${activeTab === 'doctors' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setActiveTab('doctors')}
-          style={{ flex: 1 }}
+      {/* 2. VISIT LOGGING RESTRICTIONS (SUNDAY / LEAVE) OR DOCTOR SELECTION */}
+      {isSunday ? (
+        <div
+          className="card"
+          style={{
+            textAlign: 'center',
+            padding: '36px 16px',
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-muted)',
+            marginBottom: '14px',
+          }}
         >
-          <Users size={16} />
-          <span>Doctors ({filteredDoctors.length})</span>
-          {selectedDoctorIds.size > 0 && (
-            <span style={{ background: '#fff', color: 'var(--accent-primary)', borderRadius: '9999px', padding: '0 6px', fontSize: '11px', fontWeight: '700' }}>
-              {selectedDoctorIds.size}
-            </span>
-          )}
-        </button>
-
-        <button
-          className={`btn ${activeTab === 'pharmacies' ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setActiveTab('pharmacies')}
-          style={{ flex: 1 }}
+          <Calendar size={28} style={{ margin: '0 auto 10px', color: 'var(--accent-text)' }} />
+          <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
+            Sunday
+          </h3>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            Visit logging is disabled on Sundays.
+          </p>
+        </div>
+      ) : isLeave ? (
+        <div
+          className="card"
+          style={{
+            textAlign: 'center',
+            padding: '36px 16px',
+            background: 'var(--bg-secondary)',
+            color: 'var(--text-muted)',
+            marginBottom: '14px',
+          }}
         >
-          <Pill size={16} />
-          <span>Pharmacies ({filteredPharmacies.length})</span>
-          {selectedPharmacyIds.size > 0 && (
-            <span style={{ background: '#fff', color: 'var(--accent-primary)', borderRadius: '9999px', padding: '0 6px', fontSize: '11px', fontWeight: '700' }}>
-              {selectedPharmacyIds.size}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {/* In-Camp Search Bar & Bulk Actions */}
-      <div className="search-wrapper" style={{ marginBottom: '8px' }}>
-        <Search size={16} className="search-icon" />
-        <input
-          type="text"
-          className="search-input"
-          placeholder={`Search in ${selectedCamp}...`}
-          value={searchQuery}
-          onChange={e => setSearchQuery(e.target.value)}
-        />
-        {searchQuery && (
-          <button className="search-clear" onClick={() => setSearchQuery('')}>
-            <X size={15} />
-          </button>
-        )}
-      </div>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          {activeTab === 'doctors'
-            ? `${selectedDoctorIds.size} of ${filteredDoctors.length} doctors selected`
-            : `${selectedPharmacyIds.size} of ${filteredPharmacies.length} pharmacies selected`}
-        </span>
-        <div style={{ display: 'flex', gap: '6px' }}>
-          <button className="btn btn-ghost" onClick={handleSelectAll} style={{ minHeight: '32px', padding: '4px 10px', fontSize: '12px' }}>
-            Select All
-          </button>
-          <button className="btn btn-ghost" onClick={handleClearAll} style={{ minHeight: '32px', padding: '4px 10px', fontSize: '12px' }}>
-            Clear All
-          </button>
+          <Calendar size={28} style={{ margin: '0 auto 10px', color: 'var(--warning-text)' }} />
+          <h3 style={{ fontSize: '16px', fontWeight: '700', color: 'var(--text-primary)', marginBottom: '4px' }}>
+            Leave
+          </h3>
+          <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+            Visit logging is disabled during leave.
+          </p>
         </div>
-      </div>
-
-      {/* 3. LIST OF DOCTORS / PHARMACIES */}
-      {isLoading ? (
-        <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--text-muted)' }}>
-          Loading {selectedCamp} records...
-        </div>
-      ) : activeTab === 'doctors' ? (
-        /* DOCTORS CHECKLIST */
-        filteredDoctors.length === 0 ? (
-          <div className="card" style={{ textAlign: 'center', padding: '30px 16px', color: 'var(--text-muted)' }}>
-            No doctors found in <strong>{selectedCamp}</strong>.
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {filteredDoctors.map(doc => {
-              const isSelected = selectedDoctorIds.has(doc.id);
-              const isOverdue = doc.daysSinceLastVisit === null || doc.daysSinceLastVisit >= 14;
-
-              return (
-                <div
-                  key={doc.id}
-                  className="card"
-                  onClick={() => toggleDoctor(doc.id)}
-                  style={{
-                    cursor: 'pointer',
-                    margin: 0,
-                    borderColor: isSelected ? 'var(--accent-primary)' : 'var(--border-card)',
-                    background: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-card-solid)',
-                    borderWidth: isSelected ? '1.5px' : '1px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                    {/* Checkbox Icon */}
-                    <div style={{ color: isSelected ? 'var(--accent-text)' : 'var(--text-muted)', paddingTop: '2px' }}>
-                      {isSelected ? <CheckSquare size={22} /> : <Square size={22} />}
-                    </div>
-
-                    {/* Doctor Info */}
-                    <div style={{ flex: 1 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
-                        <h4 className="card-title" style={{ fontSize: '15px' }}>{doc.name}</h4>
-                        <span className="badge badge-primary" style={{ fontSize: '10px' }}>
-                          {doc.potential}
-                        </span>
-                      </div>
-
-                      <p style={{ fontSize: '12px', color: 'var(--accent-text)', marginBottom: '4px' }}>
-                        {doc.specialties.join(', ')}
-                        {doc.pharmacy ? ` · ${doc.pharmacy}` : ''}
-                      </p>
-
-                      {/* Last Visited & Days Elapsed */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                          <Clock size={11} color="var(--text-muted)" />
-                          Last visited: <strong>{doc.lastVisitedFormatted}</strong>
-                        </span>
-                        <span>·</span>
-                        <span
-                          style={{
-                            color: isOverdue ? 'var(--warning-text)' : 'var(--success-text)',
-                            fontWeight: '600',
-                          }}
-                        >
-                          {doc.daysSinceFormatted}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )
       ) : (
-        /* PHARMACIES CHECKLIST */
-        filteredPharmacies.length === 0 ? (
-          <div className="card" style={{ textAlign: 'center', padding: '30px 16px', color: 'var(--text-muted)' }}>
-            No pharmacies registered for <strong>{selectedCamp}</strong>.
+        <>
+          {/* In-Camp Search Bar */}
+          <div className="search-wrapper" style={{ marginBottom: '8px' }}>
+            <Search size={16} className="search-icon" />
+            <input
+              type="text"
+              className="search-input"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button className="search-clear" onClick={() => setSearchQuery('')} aria-label="Clear search">
+                <X size={15} />
+              </button>
+            )}
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {filteredPharmacies.map(ph => {
-              const isSelected = selectedPharmacyIds.has(ph.id);
 
-              return (
-                <div
-                  key={ph.id}
-                  className="card"
-                  onClick={() => togglePharmacy(ph.id)}
-                  style={{
-                    cursor: 'pointer',
-                    margin: 0,
-                    borderColor: isSelected ? 'var(--accent-primary)' : 'var(--border-card)',
-                    background: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-card-solid)',
-                    borderWidth: isSelected ? '1.5px' : '1px',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ color: isSelected ? 'var(--accent-text)' : 'var(--text-muted)' }}>
-                      {isSelected ? <CheckSquare size={22} /> : <Square size={22} />}
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <h4 className="card-title" style={{ fontSize: '14px' }}>{ph.name}</h4>
-                      <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                        {ph.contact_person ? `Contact: ${ph.contact_person} ` : ''}
-                        {ph.phone ? `· ${ph.phone}` : ''}
-                      </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              {selectedDoctorIds.size} of {filteredDoctors.length} doctors selected
+            </span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                className="btn btn-ghost"
+                onClick={handleSelectAll}
+                style={{ minHeight: '32px', padding: '4px 10px', fontSize: '12px' }}
+              >
+                Select All
+              </button>
+              <button
+                className="btn btn-ghost"
+                onClick={handleClearAll}
+                style={{ minHeight: '32px', padding: '4px 10px', fontSize: '12px' }}
+              >
+                Clear All
+              </button>
+            </div>
+          </div>
+
+          {/* DOCTORS CHECKLIST */}
+          {isLoading ? (
+            <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--text-muted)' }}>
+              Loading {selectedCamp} records...
+            </div>
+          ) : filteredDoctors.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: '30px 16px', color: 'var(--text-muted)' }}>
+              No doctors found in <strong>{selectedCamp}</strong>.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {filteredDoctors.map(doc => {
+                const isSelected = selectedDoctorIds.has(doc.id);
+                const isOverdue = doc.daysSinceLastVisit === null || doc.daysSinceLastVisit >= 14;
+
+                return (
+                  <div
+                    key={doc.id}
+                    className="card"
+                    onClick={() => toggleDoctor(doc.id)}
+                    style={{
+                      cursor: 'pointer',
+                      margin: 0,
+                      borderColor: isSelected ? 'var(--accent-primary)' : 'var(--border-card)',
+                      background: isSelected ? 'var(--bg-card-hover)' : 'var(--bg-card-solid)',
+                      borderWidth: isSelected ? '1.5px' : '1px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                      {/* Checkbox Icon */}
+                      <div style={{ color: isSelected ? 'var(--accent-text)' : 'var(--text-muted)', paddingTop: '2px' }}>
+                        {isSelected ? <CheckSquare size={22} /> : <Square size={22} />}
+                      </div>
+
+                      {/* Doctor Info */}
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                          <h4 className="card-title" style={{ fontSize: '15px' }}>{doc.name}</h4>
+                          <span className="badge badge-primary" style={{ fontSize: '10px' }}>
+                            {doc.potential}
+                          </span>
+                        </div>
+
+                        <p style={{ fontSize: '12px', color: 'var(--accent-text)', marginBottom: '4px' }}>
+                          {doc.specialties.join(', ')}
+                        </p>
+
+                        {doc.pharmacy && (
+                          <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                            Attached Pharmacy: <strong>{doc.pharmacy}</strong>
+                          </p>
+                        )}
+
+                        {/* Last Visited & Days Elapsed */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                            <Clock size={11} color="var(--text-muted)" />
+                            Last visited: <strong>{doc.lastVisitedFormatted}</strong>
+                          </span>
+                          <span>·</span>
+                          <span
+                            style={{
+                              color: isOverdue ? 'var(--warning-text)' : 'var(--success-text)',
+                              fontWeight: '600',
+                            }}
+                          >
+                            {doc.daysSinceFormatted}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
 
-      {/* 4. LIVE SELECTION PREVIEW BAR & DRAWER */}
+      {/* 3. LIVE SELECTION PREVIEW BAR & DRAWER */}
       <div className="live-preview-bar">
         {/* Collapsed Bar / Summary */}
         <div
@@ -537,7 +548,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
                 fontFamily: 'var(--font-mono)',
               }}
             >
-              {totalSelectionCount}
+              {isRestricted ? 0 : selectedDoctorIds.size}
             </div>
 
             <div>
@@ -554,18 +565,20 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
                 )}
               </div>
               <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                {selectedDoctorIds.size} doctors · {selectedPharmacyIds.size} pharmacies
+                {isRestricted
+                  ? `${selectedTag.toUpperCase()} selected`
+                  : `${selectedDoctorIds.size} doctors · ${derivedPharmacies.length} linked pharmacies`}
               </p>
             </div>
 
             {isPreviewOpen ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
           </div>
 
-          {/* Quick Save Button */}
+          {/* Save Button */}
           <button
             className="btn btn-primary"
             onClick={handleSaveVisitBundle}
-            disabled={isSaving || (totalSelectionCount === 0 && selectedTag === 'normal')}
+            disabled={isSaving || (!isRestricted && selectedDoctorIds.size === 0)}
             style={{ minHeight: '38px', padding: '6px 14px', fontSize: '13px' }}
           >
             <Send size={15} />
@@ -586,7 +599,7 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
               <h4 style={{ fontSize: '12px', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                Selected Items for Visit Bundle
+                Bundle Summary
               </h4>
               <button
                 className="btn btn-ghost"
@@ -597,81 +610,91 @@ export const VisitLogger: React.FC<VisitLoggerProps> = ({
               </button>
             </div>
 
-            {/* Selected Doctors List */}
-            <div style={{ marginBottom: '10px' }}>
-              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-text)', marginBottom: '4px' }}>
-                Doctors ({selectedDoctorsList.length})
-              </div>
-              {selectedDoctorsList.length === 0 ? (
-                <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No doctors selected yet</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {selectedDoctorsList.map((doc, idx) => (
-                    <div
-                      key={doc.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        background: 'var(--bg-secondary)',
-                        padding: '6px 10px',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                      }}
-                    >
-                      <span>
-                        <strong>{idx + 1}.</strong> {doc.name} ({doc.specialties.join(', ')})
-                      </span>
-                      <button
-                        onClick={() => toggleDoctor(doc.id)}
-                        style={{ background: 'none', border: 'none', color: 'var(--danger-text)', cursor: 'pointer' }}
-                        aria-label="Remove doctor from bundle"
-                      >
-                        <X size={14} />
-                      </button>
+            {isRestricted ? (
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                Logging {selectedTag.toUpperCase()} day bundle for {selectedCamp}.
+              </p>
+            ) : (
+              <>
+                {/* Selected Doctors List */}
+                <div style={{ marginBottom: '10px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-text)', marginBottom: '4px' }}>
+                    Selected Doctors ({selectedDoctorsList.length})
+                  </div>
+                  {selectedDoctorsList.length === 0 ? (
+                    <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No doctors selected yet</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {selectedDoctorsList.map((doc, idx) => (
+                        <div
+                          key={doc.id}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: 'var(--bg-secondary)',
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                          }}
+                        >
+                          <span>
+                            <strong>{idx + 1}.</strong> {doc.name}
+                            <span style={{ color: 'var(--text-muted)', marginLeft: '4px' }}>
+                              ({doc.specialties.join(', ')})
+                            </span>
+                          </span>
+                          <button
+                            onClick={() => toggleDoctor(doc.id)}
+                            style={{ background: 'none', border: 'none', color: 'var(--danger-text)', cursor: 'pointer' }}
+                            aria-label="Remove doctor from bundle"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
 
-            {/* Selected Pharmacies List */}
-            <div>
-              <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-text)', marginBottom: '4px' }}>
-                Pharmacies ({selectedPharmaciesList.length})
-              </div>
-              {selectedPharmaciesList.length === 0 ? (
-                <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No pharmacies selected yet</p>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  {selectedPharmaciesList.map((ph, idx) => (
-                    <div
-                      key={ph.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        background: 'var(--bg-secondary)',
-                        padding: '6px 10px',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                      }}
-                    >
-                      <span>
-                        <strong>{idx + 1}.</strong> {ph.name}
-                      </span>
-                      <button
-                        onClick={() => togglePharmacy(ph.id)}
-                        style={{ background: 'none', border: 'none', color: 'var(--danger-text)', cursor: 'pointer' }}
-                        aria-label="Remove pharmacy from bundle"
-                      >
-                        <X size={14} />
-                      </button>
+                {/* Automatically Derived Linked Pharmacies List */}
+                <div>
+                  <div style={{ fontSize: '12px', fontWeight: '600', color: 'var(--accent-text)', marginBottom: '4px' }}>
+                    Linked Pharmacies ({derivedPharmacies.length})
+                  </div>
+                  {derivedPharmacies.length === 0 ? (
+                    <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      No attached pharmacies linked to selected doctors
+                    </p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      {derivedPharmacies.map((ph, idx) => (
+                        <div
+                          key={ph.id || idx}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            background: 'var(--bg-secondary)',
+                            padding: '6px 10px',
+                            borderRadius: '6px',
+                            fontSize: '12px',
+                          }}
+                        >
+                          <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Building2 size={13} color="var(--accent-text)" />
+                            <strong>{idx + 1}.</strong> {ph.name}
+                          </span>
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                            Auto-linked
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
         )}
       </div>

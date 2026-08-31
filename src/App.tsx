@@ -3,8 +3,7 @@ import { Header } from './components/Header';
 import { BottomNav, type NavTab } from './components/BottomNav';
 import { ToastProvider } from './components/Toast';
 import { DoctorDirectory } from './views/DoctorDirectory';
-import { VisitLogger } from './views/VisitLogger';
-import { VisitHistory } from './views/VisitHistory';
+import { VisitsView } from './views/VisitsView';
 import { SettingsView } from './views/SettingsView';
 import { initializeDatabase } from './db';
 import { syncEngine } from './sync/syncEngine';
@@ -51,7 +50,7 @@ export const App: React.FC = () => {
 
   const handleSelectDoctorForVisit = (doctor: Doctor) => {
     setPreSelectedDoctorId(doctor.id);
-    setActiveTab('logger');
+    setActiveTab('visits');
   };
 
   const handleVisitLoggedSuccessfully = (_bundleId: string) => {
@@ -87,14 +86,12 @@ export const App: React.FC = () => {
             <DoctorDirectory onSelectDoctorForVisit={handleSelectDoctorForVisit} />
           )}
 
-          {activeTab === 'logger' && (
-            <VisitLogger
+          {activeTab === 'visits' && (
+            <VisitsView
               onVisitLoggedSuccessfully={handleVisitLoggedSuccessfully}
               preSelectedDoctorId={preSelectedDoctorId}
             />
           )}
-
-          {activeTab === 'history' && <VisitHistory />}
 
           {activeTab === 'settings' && (
             <SettingsView theme={theme} onToggleTheme={toggleTheme} />
@@ -104,14 +101,15 @@ export const App: React.FC = () => {
         <BottomNav
           activeTab={activeTab}
           onSelectTab={tab => {
-            if (tab !== 'logger') {
+            if (tab !== 'visits') {
               setPreSelectedDoctorId(null);
             }
             setActiveTab(tab);
           }}
-          pendingCount={pendingCount}
+          hasPending={pendingCount > 0}
         />
       </div>
     </ToastProvider>
   );
 };
+

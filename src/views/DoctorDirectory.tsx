@@ -28,10 +28,14 @@ import { useToast } from '../components/Toast';
 
 interface DoctorDirectoryProps {
   onSelectDoctorForVisit?: (doctor: Doctor) => void;
+  isFilterDrawerOpenExternal?: boolean;
+  onCloseExternalFilterDrawer?: () => void;
 }
 
 export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
   onSelectDoctorForVisit,
+  isFilterDrawerOpenExternal,
+  onCloseExternalFilterDrawer,
 }) => {
   const { showToast } = useToast();
 
@@ -39,13 +43,13 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Active Filters
-  const [selectedArea, setSelectedArea] = useState('');
-  const [selectedCamp, setSelectedCamp] = useState('');
-  const [selectedSpecialty, setSelectedSpecialty] = useState('');
-  const [selectedCallSchedule, setSelectedCallSchedule] = useState('');
-  const [selectedProduct, setSelectedProduct] = useState('');
-  const [selectedPrescriber, setSelectedPrescriber] = useState('');
+  // Active Multi-Select Filters
+  const [selectedAreas, setSelectedAreas] = useState<string[]>([]);
+  const [selectedCamps, setSelectedCamps] = useState<string[]>([]);
+  const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
+  const [selectedCallSchedules, setSelectedCallSchedules] = useState<string[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
+  const [selectedPrescribers, setSelectedPrescribers] = useState<string[]>([]);
 
   // Filter Drawer & Preset Dialog State
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
@@ -65,6 +69,30 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
   const [callSchedules, setCallSchedules] = useState<SettingItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [prescribers, setPrescribers] = useState<SettingItem[]>([]);
+
+  // Sync external open state if provided from header search icon
+  useEffect(() => {
+    if (isFilterDrawerOpenExternal) {
+      setIsFilterDrawerOpen(true);
+    }
+  }, [isFilterDrawerOpenExternal]);
+
+  const handleCloseFilterDrawer = () => {
+    setIsFilterDrawerOpen(false);
+    if (onCloseExternalFilterDrawer) {
+      onCloseExternalFilterDrawer();
+    }
+  };
+
+  // Helper for Rx determination
+  const isDoctorRx = (doc: Doctor): boolean => {
+    if (!doc.prescriber) return false;
+    const p = doc.prescriber.toUpperCase();
+    return (
+      doc.prescriber === 'Rx' ||
+      (p.includes('RX') && !p.includes('NRX') && !doc.prescriber.toLowerCase().includes('non'))
+    );
+  };
 
   // Load all doctors & filter options
   const loadData = useCallback(async () => {
@@ -101,21 +129,35 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
     loadData();
   }, [loadData]);
 
-  // Combined Filtering Logic
+  // Combined Multi-Filter Logic
   const filteredDoctors = useMemo(() => {
     return doctors.filter(doc => {
       // Area filter
-      if (selectedArea && doc.area !== selectedArea) return false;
+      if (selectedAreas.length > 0 && !selectedAreas.includes(doc.area)) return false;
       // Camp filter
-      if (selectedCamp && doc.camp !== selectedCamp) return false;
-      // Specialty filter
-      if (selectedSpecialty && !doc.specialties.includes(selectedSpecialty)) return false;
+      if (selectedCamps.length > 0 && !selectedCamps.includes(doc.camp)) return false;
+      // Specialty filter (matches if doctor has any of selected specialties)
+      if (
+        selectedSpecialties.length > 0 &&
+        !doc.specialties.some(s => selectedSpecialties.includes(s))
+      ) {
+        return false;
+      }
       // Call Schedule filter
-      if (selectedCallSchedule && doc.call_schedule !== selectedCallSchedule) return false;
-      // Product filter
-      if (selectedProduct && !doc.prescribing_products.includes(selectedProduct)) return false;
+      if (selectedCallSchedules.length > 0 && !selectedCallSchedules.includes(doc.call_schedule)) {
+        return false;
+      }
+      // Product filter (matches if doctor prescribes any of selected products)
+      if (
+        selectedProducts.length > 0 &&
+        !doc.prescribing_products.some(p => selectedProducts.includes(p))
+      ) {
+        return false;
+      }
       // Prescriber filter
-      if (selectedPrescriber && doc.prescriber !== selectedPrescriber) return false;
+      if (selectedPrescribers.length > 0 && !selectedPrescribers.includes(doc.prescriber)) {
+        return false;
+      }
 
       // Text Search
       if (searchQuery.trim()) {
@@ -128,7 +170,15 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
         const matchSpecialty = doc.specialties.some(s => s.toLowerCase().includes(q));
         const matchProduct = doc.prescribing_products.some(p => p.toLowerCase().includes(q));
 
-        if (!matchName && !matchHospital && !matchPharmacy && !matchArea && !matchCamp && !matchSpecialty && !matchProduct) {
+        if (
+          !matchName &&
+          !matchHospital &&
+          !matchPharmacy &&
+          !matchArea &&
+          !matchCamp &&
+          !matchSpecialty &&
+          !matchProduct
+        ) {
           return false;
         }
       }
@@ -137,52 +187,80 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
     });
   }, [
     doctors,
-    selectedArea,
-    selectedCamp,
-    selectedSpecialty,
-    selectedCallSchedule,
-    selectedProduct,
-    selectedPrescriber,
+    selectedAreas,
+    selectedCamps,
+    selectedSpecialties,
+    selectedCallSchedules,
+    selectedProducts,
+    selectedPrescribers,
     searchQuery,
   ]);
 
   const activeFilterCount = useMemo(() => {
-    let count = 0;
-    if (selectedArea) count++;
-    if (selectedCamp) count++;
-    if (selectedSpecialty) count++;
-    if (selectedCallSchedule) count++;
-    if (selectedProduct) count++;
-    if (selectedPrescriber) count++;
-    return count;
+    return (
+      selectedAreas.length +
+      selectedCamps.length +
+      selectedSpecialties.length +
+      selectedCallSchedules.length +
+      selectedProducts.length +
+      selectedPrescribers.length
+    );
   }, [
-    selectedArea,
-    selectedCamp,
-    selectedSpecialty,
-    selectedCallSchedule,
-    selectedProduct,
-    selectedPrescriber,
+    selectedAreas,
+    selectedCamps,
+    selectedSpecialties,
+    selectedCallSchedules,
+    selectedProducts,
+    selectedPrescribers,
   ]);
 
   const clearAllFilters = () => {
-    setSelectedArea('');
-    setSelectedCamp('');
-    setSelectedSpecialty('');
-    setSelectedCallSchedule('');
-    setSelectedProduct('');
-    setSelectedPrescriber('');
+    setSelectedAreas([]);
+    setSelectedCamps([]);
+    setSelectedSpecialties([]);
+    setSelectedCallSchedules([]);
+    setSelectedProducts([]);
+    setSelectedPrescribers([]);
     setSearchQuery('');
+  };
+
+  // Toggle helper for multi-select arrays
+  const toggleItem = (list: string[], setList: React.Dispatch<React.SetStateAction<string[]>>, item: string) => {
+    if (list.includes(item)) {
+      setList(list.filter(i => i !== item));
+    } else {
+      setList([...list, item]);
+    }
   };
 
   // Apply a saved preset
   const applyPreset = (preset: SavedFilterPreset) => {
-    setSelectedArea(preset.filters.area || '');
-    setSelectedCamp(preset.filters.camp || '');
-    setSelectedSpecialty(preset.filters.specialty || '');
-    setSelectedCallSchedule(preset.filters.call_schedule || '');
-    setSelectedProduct(preset.filters.product || '');
-    setSelectedPrescriber(preset.filters.prescriber || '');
-    if (preset.filters.search) setSearchQuery(preset.filters.search);
+    const f = preset.filters;
+    if (f.areas) setSelectedAreas(f.areas);
+    else if (f.area) setSelectedAreas([f.area]);
+    else setSelectedAreas([]);
+
+    if (f.camps) setSelectedCamps(f.camps);
+    else if (f.camp) setSelectedCamps([f.camp]);
+    else setSelectedCamps([]);
+
+    if (f.specialties) setSelectedSpecialties(f.specialties);
+    else if (f.specialty) setSelectedSpecialties([f.specialty]);
+    else setSelectedSpecialties([]);
+
+    if (f.call_schedules) setSelectedCallSchedules(f.call_schedules);
+    else if (f.call_schedule) setSelectedCallSchedules([f.call_schedule]);
+    else setSelectedCallSchedules([]);
+
+    if (f.products) setSelectedProducts(f.products);
+    else if (f.product) setSelectedProducts([f.product]);
+    else setSelectedProducts([]);
+
+    if (f.prescribers) setSelectedPrescribers(f.prescribers);
+    else if (f.prescriber) setSelectedPrescribers([f.prescriber]);
+    else setSelectedPrescribers([]);
+
+    if (f.search) setSearchQuery(f.search);
     showToast(`Applied preset: ${preset.name}`, 'info');
   };
 
@@ -192,19 +270,19 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
 
     try {
       const preset = await savePreset(newPresetName, {
-        area: selectedArea || undefined,
-        camp: selectedCamp || undefined,
-        specialty: selectedSpecialty || undefined,
-        call_schedule: selectedCallSchedule || undefined,
-        product: selectedProduct || undefined,
-        prescriber: selectedPrescriber || undefined,
+        areas: selectedAreas.length > 0 ? selectedAreas : undefined,
+        camps: selectedCamps.length > 0 ? selectedCamps : undefined,
+        specialties: selectedSpecialties.length > 0 ? selectedSpecialties : undefined,
+        call_schedules: selectedCallSchedules.length > 0 ? selectedCallSchedules : undefined,
+        products: selectedProducts.length > 0 ? selectedProducts : undefined,
+        prescribers: selectedPrescribers.length > 0 ? selectedPrescribers : undefined,
         search: searchQuery || undefined,
       });
 
       setSavedPresets(prev => [...prev, preset]);
       setNewPresetName('');
       setIsSavePresetModalOpen(false);
-      showToast('Filter preset saved!', 'success');
+      showToast('Filter preset saved', 'success');
     } catch (err: any) {
       showToast('Failed to save preset: ' + err.message, 'error');
     }
@@ -251,7 +329,6 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
         <input
           type="text"
           className="search-input"
-          placeholder="Search by doctor, hospital, product, camp..."
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
         />
@@ -302,7 +379,6 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
               className="btn btn-secondary"
               onClick={() => setIsSavePresetModalOpen(true)}
               style={{ minHeight: '36px', padding: '6px 10px', fontSize: '12px', flexShrink: 0 }}
-              title="Save current filters as a quick preset"
             >
               <Bookmark size={13} />
               <span>Save Preset</span>
@@ -341,36 +417,36 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
       {/* Active Filter Badges */}
       {activeFilterCount > 0 && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '12px' }}>
-          {selectedArea && (
-            <span className="badge badge-primary">
-              Area: {selectedArea} <X size={11} style={{ cursor: 'pointer' }} onClick={() => setSelectedArea('')} />
+          {selectedAreas.map(a => (
+            <span key={a} className="badge badge-primary">
+              Area: {a} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedAreas, setSelectedAreas, a)} />
             </span>
-          )}
-          {selectedCamp && (
-            <span className="badge badge-primary">
-              Camp: {selectedCamp} <X size={11} style={{ cursor: 'pointer' }} onClick={() => setSelectedCamp('')} />
+          ))}
+          {selectedCamps.map(c => (
+            <span key={c} className="badge badge-primary">
+              Camp: {c} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedCamps, setSelectedCamps, c)} />
             </span>
-          )}
-          {selectedSpecialty && (
-            <span className="badge badge-primary">
-              Specialty: {selectedSpecialty} <X size={11} style={{ cursor: 'pointer' }} onClick={() => setSelectedSpecialty('')} />
+          ))}
+          {selectedSpecialties.map(s => (
+            <span key={s} className="badge badge-primary">
+              Specialty: {s} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedSpecialties, setSelectedSpecialties, s)} />
             </span>
-          )}
-          {selectedCallSchedule && (
-            <span className="badge badge-primary">
-              Schedule: {selectedCallSchedule} <X size={11} style={{ cursor: 'pointer' }} onClick={() => setSelectedCallSchedule('')} />
+          ))}
+          {selectedPrescribers.map(p => (
+            <span key={p} className="badge badge-primary">
+              Prescriber: {p} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedPrescribers, setSelectedPrescribers, p)} />
             </span>
-          )}
-          {selectedProduct && (
-            <span className="badge badge-primary">
-              Product: {selectedProduct} <X size={11} style={{ cursor: 'pointer' }} onClick={() => setSelectedProduct('')} />
+          ))}
+          {selectedProducts.map(pr => (
+            <span key={pr} className="badge badge-primary">
+              Product: {pr} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedProducts, setSelectedProducts, pr)} />
             </span>
-          )}
-          {selectedPrescriber && (
-            <span className="badge badge-primary">
-              Prescriber: {selectedPrescriber} <X size={11} style={{ cursor: 'pointer' }} onClick={() => setSelectedPrescriber('')} />
+          ))}
+          {selectedCallSchedules.map(cs => (
+            <span key={cs} className="badge badge-primary">
+              Schedule: {cs} <X size={11} style={{ cursor: 'pointer' }} onClick={() => toggleItem(selectedCallSchedules, setSelectedCallSchedules, cs)} />
             </span>
-          )}
+          ))}
         </div>
       )}
 
@@ -424,191 +500,242 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {filteredDoctors.map(doc => (
-            <div
-              key={doc.id}
-              className="card"
-              onClick={() => setSelectedDoctorForDetails(doc)}
-              style={{ cursor: 'pointer', margin: 0 }}
-            >
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
-                <div>
-                  <h3 className="card-title">{doc.name}</h3>
-                  <p style={{ fontSize: '12px', color: 'var(--accent-text)', fontWeight: '500' }}>
-                    {doc.specialties.join(', ')}
-                  </p>
-                </div>
-                <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
-                  <span className="badge badge-success" style={{ fontSize: '10px' }}>
-                    {doc.potential}
-                  </span>
-                  <span className="badge badge-warning" style={{ fontSize: '10px' }}>
-                    {doc.prescriber}
-                  </span>
-                </div>
-              </div>
+          {filteredDoctors.map(doc => {
+            const rx = isDoctorRx(doc);
 
-              {/* Location & Pharmacy */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                  <MapPin size={12} color="var(--text-muted)" />
-                  <strong>{doc.camp}</strong> {doc.area ? `(${doc.area})` : ''}
-                </span>
+            return (
+              <div
+                key={doc.id}
+                className={`card ${rx ? 'card-rx-highlight' : ''}`}
+                onClick={() => setSelectedDoctorForDetails(doc)}
+                style={{
+                  cursor: 'pointer',
+                  margin: 0,
+                  borderLeft: rx ? '4px solid var(--accent-primary)' : '1px solid var(--border-card)',
+                  background: rx ? 'var(--bg-card-rx)' : 'var(--bg-card-solid)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                  <div>
+                    <h3 className="card-title">{doc.name}</h3>
+                    <p style={{ fontSize: '12px', color: 'var(--accent-text)', fontWeight: '500' }}>
+                      {doc.specialties.join(', ')}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '4px', flexShrink: 0 }}>
+                    <span className="badge badge-success" style={{ fontSize: '10px' }}>
+                      {doc.potential}
+                    </span>
+                    <span
+                      className={`badge ${rx ? 'badge-primary' : 'badge-neutral'}`}
+                      style={{ fontSize: '10px', fontWeight: rx ? '700' : '500' }}
+                    >
+                      {doc.prescriber}
+                    </span>
+                  </div>
+                </div>
 
-                {doc.hospital && (
+                {/* Location & Pharmacy */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '8px' }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <Building2 size={12} color="var(--text-muted)" />
-                    {doc.hospital}
+                    <MapPin size={12} color="var(--text-muted)" />
+                    <strong>{doc.camp}</strong> {doc.area ? `(${doc.area})` : ''}
                   </span>
-                )}
 
-                {doc.pharmacy && (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-                    <Pill size={12} color="var(--text-muted)" />
-                    {doc.pharmacy}
-                  </span>
-                )}
-              </div>
+                  {doc.hospital && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                      <Building2 size={12} color="var(--text-muted)" />
+                      {doc.hospital}
+                    </span>
+                  )}
 
-              {/* Prescribing Products & Schedule */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', paddingTop: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  <Calendar size={12} />
-                  <span>Call: {doc.call_schedule_custom || doc.call_schedule}</span>
+                  {doc.pharmacy && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                      <Pill size={12} color="var(--text-muted)" />
+                      {doc.pharmacy}
+                    </span>
+                  )}
                 </div>
 
-                {doc.prescribing_products && doc.prescribing_products.length > 0 && (
-                  <span className="badge badge-neutral" style={{ fontSize: '10px' }}>
-                    {doc.prescribing_products.length} Products Tagged
-                  </span>
+                {/* Prescribing Products (Display directly on card only for Rx doctors) */}
+                {rx && doc.prescribing_products && doc.prescribing_products.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '8px', paddingTop: '4px' }}>
+                    {doc.prescribing_products.map((prod, i) => (
+                      <span
+                        key={i}
+                        className="badge badge-primary"
+                        style={{ fontSize: '10px', padding: '2px 6px' }}
+                      >
+                        {prod}
+                      </span>
+                    ))}
+                  </div>
                 )}
+
+                {/* Schedule info */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', paddingTop: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <Calendar size={12} />
+                    <span>Call: {doc.call_schedule_custom || doc.call_schedule}</span>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* FILTER DRAWER MODAL */}
+      {/* MULTI-SELECT FILTER DRAWER MODAL */}
       {isFilterDrawerOpen && (
-        <div className="modal-backdrop" onClick={() => setIsFilterDrawerOpen(false)}>
-          <div className="modal-sheet" onClick={e => e.stopPropagation()}>
+        <div className="modal-backdrop" onClick={handleCloseFilterDrawer}>
+          <div className="modal-sheet" onClick={e => e.stopPropagation()} style={{ maxHeight: '88vh' }}>
             <div className="modal-header">
               <div>
                 <h3 style={{ fontSize: '16px', fontWeight: '700' }}>Filter Doctors</h3>
                 <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Combined multi-condition filtering
+                  Multi-select filters (Tap items to toggle)
                 </p>
               </div>
               <button
                 className="btn btn-ghost btn-icon"
-                onClick={() => setIsFilterDrawerOpen(false)}
+                onClick={handleCloseFilterDrawer}
                 aria-label="Close"
               >
                 <X size={20} />
               </button>
             </div>
 
-            <div className="modal-body">
-              {/* Camp Filter */}
-              <div className="form-group">
-                <label className="form-label">Camp</label>
-                <select
-                  className="form-select"
-                  value={selectedCamp}
-                  onChange={e => setSelectedCamp(e.target.value)}
-                >
-                  <option value="">All Camps</option>
-                  {camps.map(c => (
-                    <option key={c.id} value={c.name}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Area Filter */}
-              <div className="form-group">
-                <label className="form-label">Area</label>
-                <select
-                  className="form-select"
-                  value={selectedArea}
-                  onChange={e => setSelectedArea(e.target.value)}
-                >
-                  <option value="">All Areas</option>
-                  {areas.map(a => (
-                    <option key={a.id} value={a.name}>
-                      {a.name}
-                    </option>
-                  ))}
-                </select>
+            <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* Prescriber Category */}
+              <div>
+                <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>
+                  Prescriber Status
+                </label>
+                <div className="pill-grid">
+                  {prescribers.map(p => {
+                    const isSelected = selectedPrescribers.includes(p.value);
+                    return (
+                      <button
+                        key={p.value}
+                        type="button"
+                        className={`pill-item ${isSelected ? 'selected' : ''}`}
+                        onClick={() => toggleItem(selectedPrescribers, setSelectedPrescribers, p.value)}
+                      >
+                        {p.value}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Specialty Filter */}
-              <div className="form-group">
-                <label className="form-label">Specialty</label>
-                <select
-                  className="form-select"
-                  value={selectedSpecialty}
-                  onChange={e => setSelectedSpecialty(e.target.value)}
-                >
-                  <option value="">All Specialties</option>
-                  {specialties.map(s => (
-                    <option key={s.value} value={s.value}>
-                      {s.value}
-                    </option>
-                  ))}
-                </select>
+              <div>
+                <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>
+                  Specialty
+                </label>
+                <div className="pill-grid">
+                  {specialties.map(s => {
+                    const isSelected = selectedSpecialties.includes(s.value);
+                    return (
+                      <button
+                        key={s.value}
+                        type="button"
+                        className={`pill-item ${isSelected ? 'selected' : ''}`}
+                        onClick={() => toggleItem(selectedSpecialties, setSelectedSpecialties, s.value)}
+                      >
+                        {s.value}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
-              {/* Prescriber Status Filter */}
-              <div className="form-group">
-                <label className="form-label">Prescriber Category</label>
-                <select
-                  className="form-select"
-                  value={selectedPrescriber}
-                  onChange={e => setSelectedPrescriber(e.target.value)}
-                >
-                  <option value="">All Prescriber Categories</option>
-                  {prescribers.map(p => (
-                    <option key={p.value} value={p.value}>
-                      {p.value}
-                    </option>
-                  ))}
-                </select>
+              {/* Camp Filter */}
+              <div>
+                <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>
+                  Camp
+                </label>
+                <div className="pill-grid">
+                  {camps.map(c => {
+                    const isSelected = selectedCamps.includes(c.name);
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        className={`pill-item ${isSelected ? 'selected' : ''}`}
+                        onClick={() => toggleItem(selectedCamps, setSelectedCamps, c.name)}
+                      >
+                        {c.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Area Filter */}
+              <div>
+                <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>
+                  Area
+                </label>
+                <div className="pill-grid">
+                  {areas.map(a => {
+                    const isSelected = selectedAreas.includes(a.name);
+                    return (
+                      <button
+                        key={a.id}
+                        type="button"
+                        className={`pill-item ${isSelected ? 'selected' : ''}`}
+                        onClick={() => toggleItem(selectedAreas, setSelectedAreas, a.name)}
+                      >
+                        {a.name}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Product Filter */}
-              <div className="form-group">
-                <label className="form-label">Prescribing Product</label>
-                <select
-                  className="form-select"
-                  value={selectedProduct}
-                  onChange={e => setSelectedProduct(e.target.value)}
-                >
-                  <option value="">All Products</option>
-                  {products.map(pr => (
-                    <option key={pr.id} value={pr.name}>
-                      {pr.name}
-                    </option>
-                  ))}
-                </select>
+              <div>
+                <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>
+                  Prescribing Product
+                </label>
+                <div className="pill-grid">
+                  {products.map(pr => {
+                    const isSelected = selectedProducts.includes(pr.name);
+                    return (
+                      <button
+                        key={pr.id}
+                        type="button"
+                        className={`pill-item ${isSelected ? 'selected' : ''}`}
+                        onClick={() => toggleItem(selectedProducts, setSelectedProducts, pr.name)}
+                      >
+                        {pr.name}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Call Schedule Filter */}
-              <div className="form-group">
-                <label className="form-label">Call Schedule</label>
-                <select
-                  className="form-select"
-                  value={selectedCallSchedule}
-                  onChange={e => setSelectedCallSchedule(e.target.value)}
-                >
-                  <option value="">All Schedules</option>
-                  {callSchedules.map(cs => (
-                    <option key={cs.value} value={cs.value}>
-                      {cs.value}
-                    </option>
-                  ))}
-                </select>
+              <div>
+                <label className="form-label" style={{ marginBottom: '6px', display: 'block' }}>
+                  Call Schedule
+                </label>
+                <div className="pill-grid">
+                  {callSchedules.map(cs => {
+                    const isSelected = selectedCallSchedules.includes(cs.value);
+                    return (
+                      <button
+                        key={cs.value}
+                        type="button"
+                        className={`pill-item ${isSelected ? 'selected' : ''}`}
+                        onClick={() => toggleItem(selectedCallSchedules, setSelectedCallSchedules, cs.value)}
+                      >
+                        {cs.value}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
@@ -624,7 +751,7 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
               <button
                 type="button"
                 className="btn btn-primary"
-                onClick={() => setIsFilterDrawerOpen(false)}
+                onClick={handleCloseFilterDrawer}
                 style={{ flex: 2 }}
               >
                 <Check size={16} />
@@ -656,7 +783,6 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Proddatur Core Physicians"
                   value={newPresetName}
                   onChange={e => setNewPresetName(e.target.value)}
                   required
@@ -665,10 +791,9 @@ export const DoctorDirectory: React.FC<DoctorDirectoryProps> = ({
               </div>
 
               <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                Saves: {selectedCamp && `Camp: ${selectedCamp}, `}
-                {selectedSpecialty && `Specialty: ${selectedSpecialty}, `}
-                {selectedPrescriber && `Prescriber: ${selectedPrescriber}, `}
-                {selectedProduct && `Product: ${selectedProduct}`}
+                {activeFilterCount > 0
+                  ? `Saves ${activeFilterCount} active filter selections`
+                  : 'No active filters selected'}
               </div>
             </form>
 

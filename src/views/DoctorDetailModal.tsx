@@ -108,23 +108,25 @@ export const DoctorDetailModal: React.FC<DoctorDetailModalProps> = ({
             </div>
           </div>
 
-          {/* Prescribing Products */}
-          <div className="card" style={{ marginBottom: '12px' }}>
-            <h4 style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>
-              Prescribing Products ({doctor.prescribing_products?.length || 0})
-            </h4>
-            {doctor.prescribing_products && doctor.prescribing_products.length > 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                {doctor.prescribing_products.map((prod, i) => (
-                  <span key={i} className="badge badge-neutral" style={{ fontSize: '12px', padding: '4px 8px' }}>
-                    <CheckCircle2 size={12} color="var(--success-text)" /> {prod}
-                  </span>
-                ))}
-              </div>
-            ) : (
-              <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No products tagged yet.</p>
-            )}
-          </div>
+          {/* Prescribing Products (Only for Rx doctors) */}
+          {(doctor.prescriber === 'Rx' || (doctor.prescriber && doctor.prescriber.toUpperCase().includes('RX') && !doctor.prescriber.toUpperCase().includes('NRX') && !doctor.prescriber.toLowerCase().includes('non'))) && (
+            <div className="card" style={{ marginBottom: '12px' }}>
+              <h4 style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>
+                Prescribing Products ({doctor.prescribing_products?.length || 0})
+              </h4>
+              {doctor.prescribing_products && doctor.prescribing_products.length > 0 ? (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  {doctor.prescribing_products.map((prod, i) => (
+                    <span key={i} className="badge badge-neutral" style={{ fontSize: '12px', padding: '4px 8px' }}>
+                      <CheckCircle2 size={12} color="var(--success-text)" /> {prod}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No products tagged.</p>
+              )}
+            </div>
+          )}
 
           {/* Notes */}
           {doctor.notes && (

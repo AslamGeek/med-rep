@@ -31,7 +31,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
   const [nameError, setNameError] = useState('');
   const [specialties, setSpecialties] = useState<string[]>([]);
   const [gender, setGender] = useState('Male');
-  const [email, setEmail] = useState('');
   const [notes, setNotes] = useState('');
 
   const [hospital, setHospital] = useState('');
@@ -63,6 +62,9 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
   const [allPharmacies, setAllPharmacies] = useState<Pharmacy[]>([]);
 
   const [isSaving, setIsSaving] = useState(false);
+
+  // Helper to determine if doctor is Rx
+  const isRxSelected = prescriber === 'Rx' || (prescriber && prescriber.toUpperCase().includes('RX') && !prescriber.toUpperCase().includes('NRX') && !prescriber.toLowerCase().includes('non'));
 
   // Load master data options
   useEffect(() => {
@@ -114,7 +116,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
       setName(doctorToEdit.name || '');
       setSpecialties(doctorToEdit.specialties || []);
       setGender(doctorToEdit.gender || 'Male');
-      setEmail(doctorToEdit.email || '');
       setHospital(doctorToEdit.hospital || '');
       setPharmacy(doctorToEdit.pharmacy || '');
       setArea(doctorToEdit.area || '');
@@ -132,7 +133,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
       setName('');
       setSpecialties([]);
       setGender('Male');
-      setEmail('');
       setHospital('');
       setPharmacy('');
       setOpTimingCustom('');
@@ -184,6 +184,14 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
     }
   };
 
+  const handlePrescriberChange = (newVal: string) => {
+    setPrescriber(newVal);
+    const isNewRx = newVal === 'Rx' || (newVal && newVal.toUpperCase().includes('RX') && !newVal.toUpperCase().includes('NRX') && !newVal.toLowerCase().includes('non'));
+    if (!isNewRx) {
+      setPrescribingProducts([]);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -208,7 +216,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
         name,
         specialties,
         gender,
-        email,
         hospital,
         pharmacy,
         area: area || (allAreas[0]?.name ?? ''),
@@ -220,12 +227,12 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
         op_timing_custom: opTiming.toLowerCase().includes('other') ? opTimingCustom : '',
         call_schedule: callSchedule || (callScheduleOptions[0]?.value ?? ''),
         call_schedule_custom: callSchedule.toLowerCase().includes('other') ? callScheduleCustom : '',
-        prescribing_products: prescribingProducts,
+        prescribing_products: isRxSelected ? prescribingProducts : [],
         notes,
       });
 
       showToast(
-        doctorToEdit ? `Updated ${saved.name}` : `Added ${saved.name} (Saved locally)`,
+        doctorToEdit ? `Updated ${saved.name}` : `Added ${saved.name}`,
         'success'
       );
       onSaved(saved);
@@ -256,9 +263,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
             <h2 style={{ fontSize: '16px', fontWeight: '700' }}>
               {doctorToEdit ? 'Edit Doctor' : 'Add New Doctor'}
             </h2>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              Instant offline save · Syncs with Google Sheets
-            </p>
           </div>
           <button className="btn btn-ghost btn-icon" onClick={onClose} aria-label="Close">
             <X size={20} />
@@ -276,7 +280,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
               <input
                 type="text"
                 className={`form-input ${nameError ? 'is-invalid' : ''}`}
-                placeholder="e.g. Dr. Ramesh Kumar"
                 value={name}
                 onChange={handleNameChange}
                 required
@@ -316,30 +319,17 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
               )}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              <div className="form-group">
-                <label className="form-label">Gender (Optional)</label>
-                <select
-                  className="form-select"
-                  value={gender}
-                  onChange={e => setGender(e.target.value)}
-                >
-                  <option value="Male">Male</option>
-                  <option value="Female">Female</option>
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-
-              <div className="form-group">
-                <label className="form-label">Email (Optional)</label>
-                <input
-                  type="email"
-                  className="form-input"
-                  placeholder="doctor@hospital.com"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                />
-              </div>
+            <div className="form-group">
+              <label className="form-label">Gender (Optional)</label>
+              <select
+                className="form-select"
+                value={gender}
+                onChange={e => setGender(e.target.value)}
+              >
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+                <option value="Other">Other</option>
+              </select>
             </div>
           </div>
 
@@ -390,7 +380,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
               <input
                 type="text"
                 className="form-input"
-                placeholder="e.g. Government Hospital, Care Clinic"
                 value={hospital}
                 onChange={e => setHospital(e.target.value)}
               />
@@ -456,7 +445,7 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
               <select
                 className="form-select"
                 value={prescriber}
-                onChange={e => setPrescriber(e.target.value)}
+                onChange={e => handlePrescriberChange(e.target.value)}
               >
                 {prescriberOptions.map(p => (
                   <option key={p.value} value={p.value}>
@@ -494,7 +483,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. Tuesday & Friday 4 PM - 7 PM"
                   value={opTimingCustom}
                   onChange={e => setOpTimingCustom(e.target.value)}
                 />
@@ -522,7 +510,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="e.g. 1st and 3rd Saturday"
                   value={callScheduleCustom}
                   onChange={e => setCallScheduleCustom(e.target.value)}
                 />
@@ -530,30 +517,32 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
             )}
           </div>
 
-          {/* 5. PRESCRIBING PRODUCTS */}
-          <div style={{ marginBottom: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
-            <h3 style={{ fontSize: '13px', fontWeight: '700', color: 'var(--accent-text)', marginBottom: '6px' }}>
-              PRESCRIBING PRODUCTS
-            </h3>
-            <span className="form-hint" style={{ display: 'block', marginBottom: '8px' }}>
-              Multi-select from predefined company products
-            </span>
-            <div className="pill-grid">
-              {allProducts.map(prod => {
-                const isSelected = prescribingProducts.includes(prod.name);
-                return (
-                  <button
-                    key={prod.id}
-                    type="button"
-                    className={`pill-item ${isSelected ? 'selected' : ''}`}
-                    onClick={() => toggleProduct(prod.name)}
-                  >
-                    {prod.name}
-                  </button>
-                );
-              })}
+          {/* 5. PRESCRIBING PRODUCTS (Visible only when Rx is selected) */}
+          {isRxSelected && (
+            <div style={{ marginBottom: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
+              <h3 style={{ fontSize: '13px', fontWeight: '700', color: 'var(--accent-text)', marginBottom: '6px' }}>
+                PRESCRIBING PRODUCTS
+              </h3>
+              <span className="form-hint" style={{ display: 'block', marginBottom: '8px' }}>
+                Select products prescribed by this doctor
+              </span>
+              <div className="pill-grid">
+                {allProducts.map(prod => {
+                  const isSelected = prescribingProducts.includes(prod.name);
+                  return (
+                    <button
+                      key={prod.id}
+                      type="button"
+                      className={`pill-item ${isSelected ? 'selected' : ''}`}
+                      onClick={() => toggleProduct(prod.name)}
+                    >
+                      {prod.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* 6. NOTES */}
           <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '14px' }}>
@@ -562,7 +551,6 @@ export const DoctorFormModal: React.FC<DoctorFormModalProps> = ({
               <textarea
                 className="form-textarea"
                 rows={2}
-                placeholder="e.g. Prefers meeting before 10 AM, interested in diabetic products"
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
               />

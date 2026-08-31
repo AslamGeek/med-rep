@@ -74,11 +74,8 @@ const DEFAULT_SETTINGS = [
   { category: 'Stockist', value: 'None', order_index: 4, active: true },
 
   // Prescriber
-  { category: 'Prescriber', value: 'Loyal Prescriber', order_index: 1, active: true },
-  { category: 'Prescriber', value: 'Regular Prescriber', order_index: 2, active: true },
-  { category: 'Prescriber', value: 'Trial Prescriber', order_index: 3, active: true },
-  { category: 'Prescriber', value: 'Occasional Prescriber', order_index: 4, active: true },
-  { category: 'Prescriber', value: 'Non Prescriber', order_index: 5, active: true },
+  { category: 'Prescriber', value: 'Rx', order_index: 1, active: true },
+  { category: 'Prescriber', value: 'NRx', order_index: 2, active: true },
 
   // OP Timing
   { category: 'OP Timing', value: 'Morning (9:00 AM - 1:00 PM)', order_index: 1, active: true },
@@ -293,7 +290,9 @@ function doPost(e) {
           const rowData = schema.map(col => {
             let val = doc[col];
             if (val === undefined || val === null) val = '';
-            if (Array.isArray(val) || (typeof val === 'object' && val !== null)) {
+            if (Array.isArray(val)) {
+              val = val.join(', ');
+            } else if (typeof val === 'object' && val !== null) {
               val = JSON.stringify(val);
             }
             if (col === 'updated_at' && !val) val = now;

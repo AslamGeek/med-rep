@@ -142,7 +142,6 @@ export const VisitHistory: React.FC = () => {
             type="text"
             className="search-input"
             style={{ minHeight: '38px', padding: '6px 12px 6px 36px', fontSize: '13px' }}
-            placeholder="Search doctors, pharmacies, or camps in history..."
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
           />

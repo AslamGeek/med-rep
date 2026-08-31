@@ -1,5 +1,6 @@
 import { db } from '../db';
 import type { SyncInfo, SyncState, Doctor, SettingItem, Product, Camp, Area, Pharmacy } from '../types';
+import { DEFAULT_APPS_SCRIPT_URL } from './config';
 
 const SYNC_URL_STORAGE_KEY = 'medrep_apps_script_url';
 const LAST_SYNC_TIME_KEY = 'medrep_last_sync_time';
@@ -38,11 +39,15 @@ class SyncEngine {
   }
 
   public getScriptUrl(): string {
-    return localStorage.getItem(SYNC_URL_STORAGE_KEY) || '';
+    return localStorage.getItem(SYNC_URL_STORAGE_KEY) || DEFAULT_APPS_SCRIPT_URL;
   }
 
   public setScriptUrl(url: string): void {
-    localStorage.setItem(SYNC_URL_STORAGE_KEY, url.trim());
+    if (url && url.trim() && url.trim() !== DEFAULT_APPS_SCRIPT_URL) {
+      localStorage.setItem(SYNC_URL_STORAGE_KEY, url.trim());
+    } else {
+      localStorage.removeItem(SYNC_URL_STORAGE_KEY);
+    }
     this.notifyListeners();
   }
 
@@ -197,7 +202,13 @@ class SyncEngine {
 
       for (const item of pendingItems) {
         if (item.operation === 'CREATE_DOCTOR' || item.operation === 'UPDATE_DOCTOR') {
-          doctorsToPush.push(item.payload);
+          const doc = item.payload;
+          const formattedDoc = {
+            ...doc,
+            specialties: Array.isArray(doc.specialties) ? doc.specialties.join(', ') : (doc.specialties || ''),
+            prescribing_products: Array.isArray(doc.prescribing_products) ? doc.prescribing_products.join(', ') : (doc.prescribing_products || ''),
+          };
+          doctorsToPush.push(formattedDoc);
         } else if (item.operation === 'CREATE_VISIT_BUNDLE') {
           if (item.payload.logs && Array.isArray(item.payload.logs)) {
             visitsToPush.push(...item.payload.logs);

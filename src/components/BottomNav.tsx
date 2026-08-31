@@ -1,22 +1,24 @@
 import React from 'react';
-import { Users, ClipboardCheck, History, SlidersHorizontal } from 'lucide-react';
+import { Users, ClipboardCheck, SlidersHorizontal } from 'lucide-react';
 
-export type NavTab = 'directory' | 'logger' | 'history' | 'settings';
+export type NavTab = 'directory' | 'visits' | 'settings';
 
 interface BottomNavProps {
   activeTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
-  pendingCount?: number;
+  hasPending?: boolean;
+  hidden?: boolean;
 }
 
 export const BottomNav: React.FC<BottomNavProps> = ({
   activeTab,
   onSelectTab,
-  pendingCount = 0,
+  hasPending = false,
+  hidden = false,
 }) => {
   return (
-    <nav className="bottom-nav" aria-label="Main Navigation">
-      <div className="bottom-nav-inner">
+    <nav className={`bottom-nav ${hidden ? 'bottom-nav-hidden' : ''}`} aria-label="Main Navigation">
+      <div className="bottom-nav-inner" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
         <button
           className={`nav-item ${activeTab === 'directory' ? 'active' : ''}`}
           onClick={() => onSelectTab('directory')}
@@ -27,21 +29,12 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         </button>
 
         <button
-          className={`nav-item ${activeTab === 'logger' ? 'active' : ''}`}
-          onClick={() => onSelectTab('logger')}
-          aria-label="Log Visits"
+          className={`nav-item ${activeTab === 'visits' ? 'active' : ''}`}
+          onClick={() => onSelectTab('visits')}
+          aria-label="Visits"
         >
           <ClipboardCheck size={20} />
-          <span>Log Visits</span>
-        </button>
-
-        <button
-          className={`nav-item ${activeTab === 'history' ? 'active' : ''}`}
-          onClick={() => onSelectTab('history')}
-          aria-label="Visit History"
-        >
-          <History size={20} />
-          <span>History</span>
+          <span>Visits</span>
         </button>
 
         <button
@@ -51,7 +44,20 @@ export const BottomNav: React.FC<BottomNavProps> = ({
         >
           <SlidersHorizontal size={20} />
           <span>Settings</span>
-          {pendingCount > 0 && <span className="nav-badge">{pendingCount}</span>}
+          {hasPending && (
+            <span
+              className="status-dot"
+              style={{
+                position: 'absolute',
+                top: '10px',
+                right: '30%',
+                width: '6px',
+                height: '6px',
+                borderRadius: '50%',
+                background: 'var(--warning-text)',
+              }}
+            />
+          )}
         </button>
       </div>
     </nav>

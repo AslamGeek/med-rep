@@ -116,6 +116,13 @@ export interface SavedFilterPreset {
   id: string;
   name: string;
   filters: {
+    areas?: string[];
+    camps?: string[];
+    specialties?: string[];
+    call_schedules?: string[];
+    products?: string[];
+    prescribers?: string[];
+    // Legacy single fields support
     area?: string;
     camp?: string;
     specialty?: string;
